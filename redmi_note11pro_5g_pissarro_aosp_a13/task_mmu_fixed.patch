@@ -1,0 +1,137 @@
+diff -ruaN a/drivers/input/touchscreen/fts_spi/fts_lib/Makefile b/drivers/input/touchscreen/fts_spi/fts_lib/Makefile
+--- a/drivers/input/touchscreen/fts_spi/fts_lib/Makefile	2026-04-05 21:08:45.000000000 +0800
++++ b/drivers/input/touchscreen/fts_spi/fts_lib/Makefile	2026-04-05 21:53:35.419517000 +0800
+@@ -3,5 +3,4 @@
+ #
+ 
+ 
+-obj-$(CONFIG_TOUCHSCREEN_ST_FTS_V521) += ftsCompensation.o ftsCore.o ftsError.o ftsFrame.o ftsIO.o ftsTest.o ftsTool.o ftsFlash.o ftsGesture.o
+-
++obj-$(CONFIG_TOUCHSCREEN_ST_FTS_V521) += ftsCompensation.o ftsCore.o ftsError.o ftsFrame.o ftsIO.o ftsTest.o ftsTime.o ftsTool.o ftsFlash.o ftsGesture.o
+\ No newline at end of file
+diff -ruaN a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
+--- a/fs/proc/task_mmu.c	2026-04-05 21:08:45.000000000 +0800
++++ b/fs/proc/task_mmu.c	2026-04-05 21:50:28.711810800 +0800
+@@ -21,6 +21,10 @@
+ #include <linux/mm_inline.h>
+ #include <linux/sched/signal.h>
+ 
++#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
++#include <linux/susfs_def.h>
++#endif // #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
++
+ #include <asm/elf.h>
+ #include <asm/tlb.h>
+ #include <asm/tlbflush.h>
+@@ -725,43 +729,30 @@
+ 
+ 		[ilog2(VM_READ)]	= "rd",
+ 		[ilog2(VM_WRITE)]	= "wr",
+-		[ilog2(VM_EXEC)]	= "ex",
+-		[ilog2(VM_SHARED)]	= "sh",
++		[ilog2(VM_EXEC)]	= "ex",[ilog2(VM_SHARED)]	= "sh",
+ 		[ilog2(VM_MAYREAD)]	= "mr",
+-		[ilog2(VM_MAYWRITE)]	= "mw",
+-		[ilog2(VM_MAYEXEC)]	= "me",
++		[ilog2(VM_MAYWRITE)]	= "mw",[ilog2(VM_MAYEXEC)]	= "me",
+ 		[ilog2(VM_MAYSHARE)]	= "ms",
+-		[ilog2(VM_GROWSDOWN)]	= "gd",
+-		[ilog2(VM_PFNMAP)]	= "pf",
++		[ilog2(VM_GROWSDOWN)]	= "gd",[ilog2(VM_PFNMAP)]	= "pf",
+ 		[ilog2(VM_DENYWRITE)]	= "dw",
+-#ifdef CONFIG_X86_INTEL_MPX
+-		[ilog2(VM_MPX)]		= "mp",
+-#endif
+-		[ilog2(VM_LOCKED)]	= "lo",
+-		[ilog2(VM_IO)]		= "io",
+-		[ilog2(VM_SEQ_READ)]	= "sr",
+-		[ilog2(VM_RAND_READ)]	= "rr",
++#ifdef CONFIG_X86_INTEL_MPX[ilog2(VM_MPX)]		= "mp",
++#endif[ilog2(VM_LOCKED)]	= "lo",
++		[ilog2(VM_IO)]		= "io",[ilog2(VM_SEQ_READ)]	= "sr",[ilog2(VM_RAND_READ)]	= "rr",
+ 		[ilog2(VM_DONTCOPY)]	= "dc",
+-		[ilog2(VM_DONTEXPAND)]	= "de",
+-		[ilog2(VM_ACCOUNT)]	= "ac",
++		[ilog2(VM_DONTEXPAND)]	= "de",[ilog2(VM_ACCOUNT)]	= "ac",
+ 		[ilog2(VM_NORESERVE)]	= "nr",
+-		[ilog2(VM_HUGETLB)]	= "ht",
+-		[ilog2(VM_ARCH_1)]	= "ar",
++		[ilog2(VM_HUGETLB)]	= "ht",[ilog2(VM_ARCH_1)]	= "ar",
+ 		[ilog2(VM_WIPEONFORK)]	= "wf",
+ 		[ilog2(VM_DONTDUMP)]	= "dd",
+ #ifdef CONFIG_MEM_SOFT_DIRTY
+ 		[ilog2(VM_SOFTDIRTY)]	= "sd",
+ #endif
+ 		[ilog2(VM_MIXEDMAP)]	= "mm",
+-		[ilog2(VM_HUGEPAGE)]	= "hg",
+-		[ilog2(VM_NOHUGEPAGE)]	= "nh",
++		[ilog2(VM_HUGEPAGE)]	= "hg",[ilog2(VM_NOHUGEPAGE)]	= "nh",
+ 		[ilog2(VM_MERGEABLE)]	= "mg",
+-		[ilog2(VM_UFFD_MISSING)]= "um",
+-		[ilog2(VM_UFFD_WP)]	= "uw",
++		[ilog2(VM_UFFD_MISSING)]= "um",[ilog2(VM_UFFD_WP)]	= "uw",
+ #ifdef CONFIG_X86_INTEL_MEMORY_PROTECTION_KEYS
+-		/* These come out via ProtectionKey: */
+-		[ilog2(VM_PKEY_BIT0)]	= "",
+-		[ilog2(VM_PKEY_BIT1)]	= "",
++		/* These come out via ProtectionKey: */[ilog2(VM_PKEY_BIT0)]	= "",[ilog2(VM_PKEY_BIT1)]	= "",
+ 		[ilog2(VM_PKEY_BIT2)]	= "",
+ 		[ilog2(VM_PKEY_BIT3)]	= "",
+ #endif
+@@ -912,6 +903,20 @@
+ 		seq_putc(m, '\n');
+ 	}
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++	if (vma->vm_file) {
++		struct inode *inode = file_inode(vma->vm_file);
++		if (SUSFS_IS_INODE_SUS_MAP(inode)) {
++			seq_printf(m,
++				"Size:           %8lu kB\n"
++				"KernelPageSize: %8lu kB\n"
++				"MMUPageSize:    %8lu kB\n",
++				(vma->vm_end - vma->vm_start) >> 10,
++				4, 4);
++			goto bypass_orig_flow;
++		}
++	}
++#endif
+ 	seq_printf(m,
+ 		   "Size:           %8lu kB\n"
+ 		   "KernelPageSize: %8lu kB\n"
+@@ -920,11 +925,28 @@
+ 		   vma_kernel_pagesize(vma) >> 10,
+ 		   vma_mmu_pagesize(vma) >> 10);
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++bypass_orig_flow:
++#endif
++
+ 	__show_smap(m, &mss);
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++	if (vma->vm_file) {
++		struct inode *inode = file_inode(vma->vm_file);
++		if (SUSFS_IS_INODE_SUS_MAP(inode)) {
++			seq_puts(m, "VmFlags: mr mw me");
++			seq_putc(m, '\n');
++			goto bypass_orig_flow2;
++		}
++	}
++#endif
+ 	arch_show_smap(m, vma);
+ 	show_smap_vma_flags(m, vma);
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++bypass_orig_flow2:
++#endif
+ 	m_cache_vma(m, vma);
+ 
+ 	return 0;
+@@ -2256,4 +2278,4 @@
+ 	.release	= proc_map_release,
+ };
+ 
+-#endif /* CONFIG_NUMA */
++#endif /* CONFIG_NUMA */
+\ No newline at end of file
