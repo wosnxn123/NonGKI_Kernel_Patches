@@ -1,39 +1,12 @@
-diff -ruaN a/drivers/kernelsu/policy/app_profile.c b/drivers/kernelsu/policy/app_profile.c
---- a/drivers/kernelsu/policy/app_profile.c	2026-04-10 23:58:05.071966000 +0800
-+++ b/drivers/kernelsu/policy/app_profile.c	2026-04-10 23:58:21.206202300 +0800
-@@ -1,3 +1,23 @@
-+#include <linux/capability.h>
-+#include <linux/cred.h>
-+#include <linux/sched.h>
-+#include <linux/sched/user.h>
-+#include <linux/sched/signal.h>
-+#include <linux/seccomp.h>
-+#include <linux/slab.h>
-+#include <linux/thread_info.h>
-+#include <linux/uidgid.h>
-+#include <linux/version.h>
-+#include <linux/tty.h>
-+#include "objsec.h"
-+
-+#include "policy/allowlist.h"
-+#include "policy/app_profile.h"
-+#include "klog.h" // IWYU pragma: keep
-+#include "selinux/selinux.h"
-+#include "infra/su_mount_ns.h"
-+#include "hook/tp_marker.h"
-+
- #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
- static struct group_info root_groups = { .usage = REFCOUNT_INIT(2) };
- #else
-@@ -52,6 +72,12 @@
+--- a/drivers/kernelsu/policy/app_profile.c
++++ b/drivers/kernelsu/policy/app_profile.c
+@@ -68,6 +68,10 @@
  #define KSU_HAS_SECCOMP_FILTER_RELEASE
  #endif
  
-+/* === 修复老版本内核遗漏 seccomp_filter_release 的编译报错 === */
 +#ifndef KSU_HAS_SECCOMP_FILTER_RELEASE
 +#define seccomp_filter_release put_seccomp_filter
 +#endif
-+/* ============================================================ */
 +
  static void disable_seccomp(void)
  {
