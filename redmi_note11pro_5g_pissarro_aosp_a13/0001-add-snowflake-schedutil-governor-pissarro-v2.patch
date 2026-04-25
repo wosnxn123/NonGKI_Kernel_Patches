@@ -1,0 +1,763 @@
+From 2222222222222222222222222222222222222222 Mon Sep 17 00:00:00 2001
+From: ChatGPT <noreply@openai.com>
+Date: Sat, 25 Apr 2026 00:00:00 -0700
+Subject: [PATCH] sched/cpufreq: add Snowflake schedutil-class governor
+
+Add a schedutil-class CPUFreq governor named "snowflake" for the
+pissarro/MT6877 4.14 Android kernel tree.
+
+This is not a simple polling governor.  It lives in kernel/sched so it can
+use the same scheduler-private cpufreq_update_util() path as schedutil,
+including WALT/boosted utilization, uclamp, iowait boost, fast-switch and
+slow-switch cpufreq drivers.  It also preserves the MTK SSPM frequency path
+when CONFIG_MTK_TINYSYS_SSPM_SUPPORT is enabled.
+
+The governor is built whenever CONFIG_CPU_FREQ is enabled, avoiding extra
+Kconfig/defconfig churn.  Runtime tuning knobs are exposed as built-in module
+parameters under:
+
+  /sys/module/cpufreq_snowflake/parameters/
+
+Signed-off-by: ChatGPT <noreply@openai.com>
+---
+ kernel/sched/Makefile             |   1 +
+ kernel/sched/cpufreq_snowflake.c  | 719 ++++++++++++++++++++++++++++++
+ 2 files changed, 720 insertions(+)
+ create mode 100644 kernel/sched/cpufreq_snowflake.c
+
+diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
+index 000000000000..111111111111 100644
+--- a/kernel/sched/Makefile
++++ b/kernel/sched/Makefile
+@@ -30,6 +30,7 @@ obj-$(CONFIG_CGROUP_CPUACCT) += cpuacct.o
+ obj-$(CONFIG_CPU_FREQ) += cpufreq.o
++obj-$(CONFIG_CPU_FREQ) += cpufreq_snowflake.o
+ obj-$(CONFIG_CPU_FREQ_GOV_SCHEDUTIL) += cpufreq_schedutil.o
+ obj-$(CONFIG_MEMBARRIER) += membarrier.o
+ obj-$(CONFIG_PSI) += psi.o
+
+diff --git a/kernel/sched/cpufreq_snowflake.c b/kernel/sched/cpufreq_snowflake.c
+new file mode 100644
+index 000000000000..222222222222
+--- /dev/null
++++ b/kernel/sched/cpufreq_snowflake.c
+@@ -0,0 +1,719 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Snowflake CPUFreq governor for Android 4.14 / MTK non-GKI kernels.
++ *
++ * This is a schedutil-class governor: it consumes scheduler utilization
++ * through cpufreq_update_util() hooks, keeps WALT/uclamp/iowait behaviour,
++ * supports fast-switch and slow-switch cpufreq drivers, and adds a small set
++ * of Android-friendly response knobs.  It registers as "snowflake".
++ */
++
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
++
++#include <linux/cpufreq.h>
++#include <linux/init.h>
++#include <linux/irq_work.h>
++#include <linux/kthread.h>
++#include <linux/kernel.h>
++#include <linux/math64.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++#include <linux/time.h>
++#include <trace/events/power.h>
++
++#include "sched.h"
++#include "tune.h"
++#include "cpufreq_schedutil.h"
++
++#define SNOWFLAKE_KTHREAD_PRIORITY 50
++#define SNOWFLAKE_DEFAULT_TARGET_LOAD 80
++#define SNOWFLAKE_DEFAULT_HISPEED_LOAD 85
++#define SNOWFLAKE_DEFAULT_UP_RATE_US 500
++#define SNOWFLAKE_DEFAULT_DOWN_RATE_US 20000
++
++static struct cpufreq_governor snowflake_gov;
++
++/* Provided by the scheduler tree in this kernel, same source as schedutil. */
++unsigned long boosted_cpu_util(int cpu);
++
++/*
++ * Global tunables are deliberately module parameters instead of a new Kconfig
++ * dependency.  On Android built-in objects they appear under:
++ *   /sys/module/cpufreq_snowflake/parameters/
++ */
++static unsigned int snowflake_up_rate_limit_us = SNOWFLAKE_DEFAULT_UP_RATE_US;
++module_param_named(up_rate_limit_us, snowflake_up_rate_limit_us, uint, 0644);
++MODULE_PARM_DESC(up_rate_limit_us, "minimum interval between upward frequency changes");
++
++static unsigned int snowflake_down_rate_limit_us = SNOWFLAKE_DEFAULT_DOWN_RATE_US;
++module_param_named(down_rate_limit_us, snowflake_down_rate_limit_us, uint, 0644);
++MODULE_PARM_DESC(down_rate_limit_us, "minimum interval between downward frequency changes");
++
++static unsigned int snowflake_target_load = SNOWFLAKE_DEFAULT_TARGET_LOAD;
++module_param_named(target_load, snowflake_target_load, uint, 0644);
++MODULE_PARM_DESC(target_load, "target scheduler utilization percentage, lower is more aggressive");
++
++static unsigned int snowflake_hispeed_load = SNOWFLAKE_DEFAULT_HISPEED_LOAD;
++module_param_named(hispeed_load, snowflake_hispeed_load, uint, 0644);
++MODULE_PARM_DESC(hispeed_load, "utilization percentage that forces at least hispeed_freq");
++
++static unsigned int snowflake_hispeed_freq;
++module_param_named(hispeed_freq, snowflake_hispeed_freq, uint, 0644);
++MODULE_PARM_DESC(hispeed_freq, "minimum boost frequency in kHz when hispeed_load is reached, 0 = auto");
++
++static unsigned int snowflake_boost_pct;
++module_param_named(boost_pct, snowflake_boost_pct, uint, 0644);
++MODULE_PARM_DESC(boost_pct, "extra utilization boost percentage, 0..30 recommended");
++
++static unsigned int snowflake_iowait_boost_enable = 1;
++module_param_named(iowait_boost_enable, snowflake_iowait_boost_enable, uint, 0644);
++MODULE_PARM_DESC(iowait_boost_enable, "enable schedutil-style iowait boost");
++
++static unsigned int snowflake_busy_hold_enable = 1;
++module_param_named(busy_hold_enable, snowflake_busy_hold_enable, uint, 0644);
++MODULE_PARM_DESC(busy_hold_enable, "avoid dropping frequency while the CPU stayed busy");
++
++static unsigned int snowflake_rt_dl_boost_enable = 1;
++module_param_named(rt_dl_boost_enable, snowflake_rt_dl_boost_enable, uint, 0644);
++MODULE_PARM_DESC(rt_dl_boost_enable, "boost deadline/RT frequency requests to policy max");
++
++struct snowflake_policy {
++	struct cpufreq_policy *policy;
++	raw_spinlock_t update_lock; /* protects shared-policy utilization */
++
++	u64 last_freq_update_time;
++	s64 min_rate_limit_ns;
++	s64 up_rate_delay_ns;
++	s64 down_rate_delay_ns;
++
++	unsigned int next_freq;
++	unsigned int cached_raw_freq;
++
++	struct irq_work irq_work;
++	struct kthread_work work;
++	struct mutex work_lock;
++	struct kthread_worker worker;
++	struct task_struct *thread;
++	bool work_in_progress;
++	bool need_freq_update;
++};
++
++struct snowflake_cpu {
++	struct update_util_data update_util;
++	struct snowflake_policy *sf_policy;
++	unsigned int cpu;
++
++	bool iowait_boost_pending;
++	unsigned int iowait_boost;
++	unsigned int iowait_boost_max;
++	u64 last_update;
++
++	unsigned long util;
++	unsigned long max;
++	unsigned int flags;
++	unsigned long min_boost;
++
++#ifdef CONFIG_NO_HZ_COMMON
++	unsigned long saved_idle_calls;
++#endif
++};
++
++static DEFINE_PER_CPU(struct snowflake_cpu, snowflake_cpu);
++
++static unsigned int snowflake_clamp_pct(unsigned int val,
++					unsigned int min,
++					unsigned int max)
++{
++	if (val < min)
++		return min;
++	if (val > max)
++		return max;
++	return val;
++}
++
++static void snowflake_refresh_rate_limits(struct snowflake_policy *sf_policy)
++{
++	unsigned int up_us = snowflake_up_rate_limit_us;
++	unsigned int down_us = snowflake_down_rate_limit_us;
++
++	/* Keep pathological sysfs writes from stalling DVFS completely. */
++	up_us = min(up_us, 500000U);
++	down_us = min(down_us, 1000000U);
++
++	sf_policy->up_rate_delay_ns = (s64)up_us * NSEC_PER_USEC;
++	sf_policy->down_rate_delay_ns = (s64)down_us * NSEC_PER_USEC;
++	sf_policy->min_rate_limit_ns = min(sf_policy->up_rate_delay_ns,
++					     sf_policy->down_rate_delay_ns);
++}
++
++static bool snowflake_should_update_freq(struct snowflake_policy *sf_policy,
++					 u64 time)
++{
++	s64 delta_ns;
++	struct cpufreq_policy *policy = sf_policy->policy;
++
++	if (policy->governor != &snowflake_gov || !policy->governor_data)
++		return false;
++
++	if (policy->fast_switch_enabled && !cpufreq_can_do_remote_dvfs(policy))
++		return false;
++
++	if (sf_policy->work_in_progress)
++		return false;
++
++	snowflake_refresh_rate_limits(sf_policy);
++
++	if (unlikely(sf_policy->need_freq_update)) {
++		sf_policy->need_freq_update = false;
++		sf_policy->next_freq = UINT_MAX;
++		return true;
++	}
++
++	delta_ns = time - sf_policy->last_freq_update_time;
++	return delta_ns >= sf_policy->min_rate_limit_ns;
++}
++
++static bool snowflake_up_down_rate_limit(struct snowflake_policy *sf_policy,
++					 u64 time, unsigned int next_freq)
++{
++	s64 delta_ns = time - sf_policy->last_freq_update_time;
++
++	if (next_freq > sf_policy->next_freq &&
++	    delta_ns < sf_policy->up_rate_delay_ns)
++		return true;
++
++	if (next_freq < sf_policy->next_freq &&
++	    delta_ns < sf_policy->down_rate_delay_ns)
++		return true;
++
++	return false;
++}
++
++static unsigned int snowflake_auto_hispeed(struct cpufreq_policy *policy)
++{
++	unsigned int freq;
++
++	if (snowflake_hispeed_freq)
++		freq = snowflake_hispeed_freq;
++	else
++		freq = policy->min + div_u64((u64)(policy->max - policy->min) * 60,
++					       100);
++
++	return clamp_val(freq, policy->min, policy->max);
++}
++
++static unsigned int snowflake_get_next_freq(struct snowflake_policy *sf_policy,
++					    unsigned long util,
++					    unsigned long max)
++{
++	struct cpufreq_policy *policy = sf_policy->policy;
++	unsigned int base_freq, target_load, hispeed_load;
++	u64 freq;
++
++	if (!max)
++		max = 1;
++
++	if (snowflake_boost_pct) {
++		unsigned int boost = snowflake_clamp_pct(snowflake_boost_pct, 0, 30);
++
++		util += div_u64((u64)max * boost, 100);
++		util = min_t(unsigned long, util, max);
++	}
++
++	base_freq = arch_scale_freq_invariant() ? policy->cpuinfo.max_freq : policy->cur;
++	if (!base_freq)
++		base_freq = policy->cpuinfo.max_freq;
++
++	target_load = snowflake_clamp_pct(snowflake_target_load, 50, 99);
++
++	/* schedutil default is effectively max_freq * util / max * 1.25. */
++	freq = (u64)base_freq * util * 100;
++	freq = div64_u64(freq, (u64)max * target_load);
++
++	hispeed_load = snowflake_clamp_pct(snowflake_hispeed_load, 1, 100);
++	if ((u64)util * 100 >= (u64)max * hispeed_load)
++		freq = max_t(u64, freq, snowflake_auto_hispeed(policy));
++
++	freq = clamp_t(u64, freq, policy->min, policy->max);
++	sf_policy->cached_raw_freq = (unsigned int)freq;
++
++#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
++	return (unsigned int)freq;
++#else
++	return cpufreq_driver_resolve_freq(policy, (unsigned int)freq);
++#endif
++}
++
++static void snowflake_update_commit(struct snowflake_policy *sf_policy,
++				     u64 time, unsigned int next_freq)
++{
++	struct cpufreq_policy *policy = sf_policy->policy;
++
++	if (sf_policy->next_freq == next_freq)
++		return;
++
++	if (snowflake_up_down_rate_limit(sf_policy, time, next_freq))
++		return;
++
++	sf_policy->next_freq = next_freq;
++	sf_policy->last_freq_update_time = time;
++
++#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
++	{
++		int cid = arch_get_cluster_id(policy->cpu);
++		unsigned int resolved;
++
++		resolved = clamp_val(next_freq, policy->min, policy->max);
++		resolved = mt_cpufreq_find_close_freq(cid, resolved);
++		if (!resolved)
++			resolved = clamp_val(next_freq, policy->min, policy->max);
++
++		mt_cpufreq_set_by_wfi_load_cluster(cid, resolved);
++		policy->cur = resolved;
++	}
++#else
++	if (policy->fast_switch_enabled) {
++		next_freq = cpufreq_driver_fast_switch(policy, next_freq);
++		if (!next_freq)
++			return;
++
++		policy->cur = next_freq;
++		trace_cpu_frequency(next_freq, smp_processor_id());
++	} else {
++		sf_policy->work_in_progress = true;
++		irq_work_queue(&sf_policy->irq_work);
++	}
++#endif
++}
++
++static void snowflake_get_util(unsigned long *util, unsigned long *max, int cpu)
++{
++	unsigned long max_cap = arch_scale_cpu_capacity(NULL, cpu);
++
++	*util = boosted_cpu_util(cpu);
++	if (idle_cpu(cpu))
++		*util = 0;
++
++	*util = min(*util, max_cap);
++	*max = max_cap;
++}
++
++static void snowflake_set_iowait_boost(struct snowflake_cpu *sf_cpu,
++				       u64 time, unsigned int flags)
++{
++	unsigned int max_boost;
++
++	if (!snowflake_iowait_boost_enable) {
++		sf_cpu->iowait_boost = 0;
++		sf_cpu->iowait_boost_pending = false;
++		return;
++	}
++
++	if (flags & SCHED_CPUFREQ_IOWAIT) {
++		if (sf_cpu->iowait_boost_pending)
++			return;
++
++		sf_cpu->iowait_boost_pending = true;
++		max_boost = sf_cpu->iowait_boost_max;
++		max_boost = uclamp_util(cpu_rq(sf_cpu->cpu), max_boost);
++
++		if (sf_cpu->iowait_boost) {
++			sf_cpu->iowait_boost <<= 1;
++			if (sf_cpu->iowait_boost > max_boost)
++				sf_cpu->iowait_boost = max_boost;
++		} else {
++			sf_cpu->iowait_boost = sf_cpu->min_boost;
++		}
++	} else if (sf_cpu->iowait_boost) {
++		s64 delta_ns = time - sf_cpu->last_update;
++
++		if (delta_ns > TICK_NSEC) {
++			sf_cpu->iowait_boost = 0;
++			sf_cpu->iowait_boost_pending = false;
++		}
++	}
++}
++
++static void snowflake_iowait_boost(struct snowflake_cpu *sf_cpu,
++				   unsigned long *util, unsigned long *max)
++{
++	unsigned int boost_util, boost_max;
++
++	if (!snowflake_iowait_boost_enable || !sf_cpu->iowait_boost)
++		return;
++
++	if (sf_cpu->iowait_boost_pending) {
++		sf_cpu->iowait_boost_pending = false;
++	} else {
++		sf_cpu->iowait_boost >>= 1;
++		if (sf_cpu->iowait_boost < sf_cpu->min_boost) {
++			sf_cpu->iowait_boost = 0;
++			return;
++		}
++	}
++
++	boost_util = sf_cpu->iowait_boost;
++	boost_max = sf_cpu->iowait_boost_max;
++	if (*util * boost_max < *max * boost_util) {
++		*util = boost_util;
++		*max = boost_max;
++	}
++}
++
++#ifdef CONFIG_NO_HZ_COMMON
++static bool snowflake_cpu_is_busy(struct snowflake_cpu *sf_cpu)
++{
++	unsigned long idle_calls = tick_nohz_get_idle_calls_cpu(sf_cpu->cpu);
++	bool ret = idle_calls == sf_cpu->saved_idle_calls;
++
++	sf_cpu->saved_idle_calls = idle_calls;
++	return ret;
++}
++#else
++static inline bool snowflake_cpu_is_busy(struct snowflake_cpu *sf_cpu)
++{
++	return false;
++}
++#endif
++
++static void snowflake_update_single(struct update_util_data *hook,
++				    u64 time, unsigned int flags)
++{
++	struct snowflake_cpu *sf_cpu = container_of(hook, struct snowflake_cpu,
++						      update_util);
++	struct snowflake_policy *sf_policy = sf_cpu->sf_policy;
++	struct cpufreq_policy *policy = sf_policy->policy;
++	unsigned long util, max;
++	unsigned int next_f;
++	bool busy;
++
++	snowflake_set_iowait_boost(sf_cpu, time, flags);
++	sf_cpu->last_update = time;
++
++	if (!snowflake_should_update_freq(sf_policy, time))
++		return;
++
++	busy = snowflake_cpu_is_busy(sf_cpu);
++
++	if (snowflake_rt_dl_boost_enable && (flags & SCHED_CPUFREQ_DL)) {
++		next_f = policy->cpuinfo.max_freq;
++	} else {
++		snowflake_get_util(&util, &max, sf_cpu->cpu);
++		util = uclamp_util(cpu_rq(sf_cpu->cpu), util);
++		snowflake_iowait_boost(sf_cpu, &util, &max);
++		next_f = snowflake_get_next_freq(sf_policy, util, max);
++
++#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
++		{
++			int cid = arch_get_cluster_id(policy->cpu);
++
++			next_f = clamp_val(next_f, policy->min, policy->max);
++			next_f = mt_cpufreq_find_close_freq(cid, next_f);
++			if (!next_f)
++				next_f = policy->min;
++		}
++#endif
++
++		if (snowflake_busy_hold_enable && busy &&
++		    next_f < sf_policy->next_freq &&
++		    sf_policy->next_freq != UINT_MAX) {
++			next_f = sf_policy->next_freq;
++			sf_policy->cached_raw_freq = 0;
++		}
++	}
++
++	snowflake_update_commit(sf_policy, time, next_f);
++}
++
++static unsigned int snowflake_next_freq_shared(struct snowflake_cpu *sf_cpu,
++					       u64 time)
++{
++	struct snowflake_policy *sf_policy = sf_cpu->sf_policy;
++	struct cpufreq_policy *policy = sf_policy->policy;
++	unsigned long util = 0, max = 1;
++	unsigned int j;
++	unsigned int next_f;
++
++	for_each_cpu(j, policy->cpus) {
++		struct snowflake_cpu *j_sf_cpu = &per_cpu(snowflake_cpu, j);
++		unsigned long j_util, j_max;
++		s64 delta_ns;
++
++		delta_ns = time - j_sf_cpu->last_update;
++		if (delta_ns > TICK_NSEC) {
++			j_sf_cpu->iowait_boost = 0;
++			j_sf_cpu->iowait_boost_pending = false;
++			if (idle_cpu(j))
++				continue;
++		}
++
++		if (snowflake_rt_dl_boost_enable &&
++		    (j_sf_cpu->flags & SCHED_CPUFREQ_DL))
++			return policy->cpuinfo.max_freq;
++
++		j_util = j_sf_cpu->util;
++		j_max = j_sf_cpu->max;
++		j_util = uclamp_util(cpu_rq(j), j_util);
++
++		if (j_util * max > j_max * util) {
++			util = j_util;
++			max = j_max;
++		}
++
++		snowflake_iowait_boost(j_sf_cpu, &util, &max);
++	}
++
++	next_f = snowflake_get_next_freq(sf_policy, util, max);
++
++#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
++	{
++		int cid = arch_get_cluster_id(policy->cpu);
++
++		next_f = clamp_val(next_f, policy->min, policy->max);
++		next_f = mt_cpufreq_find_close_freq(cid, next_f);
++		if (!next_f)
++			next_f = policy->min;
++	}
++#endif
++
++	return next_f;
++}
++
++static void snowflake_update_shared(struct update_util_data *hook,
++				    u64 time, unsigned int flags)
++{
++	struct snowflake_cpu *sf_cpu = container_of(hook, struct snowflake_cpu,
++						      update_util);
++	struct snowflake_policy *sf_policy = sf_cpu->sf_policy;
++	unsigned long util, max;
++	unsigned int next_f;
++
++	snowflake_get_util(&util, &max, sf_cpu->cpu);
++
++	raw_spin_lock(&sf_policy->update_lock);
++
++	sf_cpu->util = util;
++	sf_cpu->max = max;
++	sf_cpu->flags = flags;
++	snowflake_set_iowait_boost(sf_cpu, time, flags);
++	sf_cpu->last_update = time;
++
++	if (snowflake_should_update_freq(sf_policy, time)) {
++		if (snowflake_rt_dl_boost_enable && (flags & SCHED_CPUFREQ_DL))
++			next_f = sf_policy->policy->cpuinfo.max_freq;
++		else
++			next_f = snowflake_next_freq_shared(sf_cpu, time);
++
++		snowflake_update_commit(sf_policy, time, next_f);
++	}
++
++	raw_spin_unlock(&sf_policy->update_lock);
++}
++
++static void snowflake_work(struct kthread_work *work)
++{
++	struct snowflake_policy *sf_policy = container_of(work,
++						       struct snowflake_policy, work);
++
++	mutex_lock(&sf_policy->work_lock);
++	__cpufreq_driver_target(sf_policy->policy, sf_policy->next_freq,
++			      CPUFREQ_RELATION_L);
++	mutex_unlock(&sf_policy->work_lock);
++
++	sf_policy->work_in_progress = false;
++}
++
++static void snowflake_irq_work(struct irq_work *irq_work)
++{
++	struct snowflake_policy *sf_policy = container_of(irq_work,
++						       struct snowflake_policy, irq_work);
++
++	kthread_queue_work(&sf_policy->worker, &sf_policy->work);
++}
++
++static struct snowflake_policy *snowflake_policy_alloc(struct cpufreq_policy *policy)
++{
++	struct snowflake_policy *sf_policy;
++
++	sf_policy = kzalloc(sizeof(*sf_policy), GFP_KERNEL);
++	if (!sf_policy)
++		return NULL;
++
++	sf_policy->policy = policy;
++	raw_spin_lock_init(&sf_policy->update_lock);
++	return sf_policy;
++}
++
++static int snowflake_kthread_create(struct snowflake_policy *sf_policy)
++{
++	struct task_struct *thread;
++	struct sched_param param = {
++		.sched_priority = MAX_USER_RT_PRIO / 2,
++	};
++	struct cpufreq_policy *policy = sf_policy->policy;
++	int ret;
++
++	if (policy->fast_switch_enabled)
++		return 0;
++
++	kthread_init_work(&sf_policy->work, snowflake_work);
++	kthread_init_worker(&sf_policy->worker);
++	thread = kthread_create(kthread_worker_fn, &sf_policy->worker,
++				"snowflake:%d", cpumask_first(policy->related_cpus));
++	if (IS_ERR(thread)) {
++		pr_err("failed to create snowflake thread: %ld\n", PTR_ERR(thread));
++		return PTR_ERR(thread);
++	}
++
++	ret = sched_setscheduler_nocheck(thread, SCHED_FIFO, &param);
++	if (ret) {
++		kthread_stop(thread);
++		pr_warn("%s: failed to set SCHED_FIFO\n", __func__);
++		return ret;
++	}
++
++	sf_policy->thread = thread;
++	if (!policy->dvfs_possible_from_any_cpu)
++		kthread_bind_mask(thread, policy->related_cpus);
++
++	init_irq_work(&sf_policy->irq_work, snowflake_irq_work);
++	mutex_init(&sf_policy->work_lock);
++	wake_up_process(thread);
++	return 0;
++}
++
++static void snowflake_kthread_stop(struct snowflake_policy *sf_policy)
++{
++	if (sf_policy->policy->fast_switch_enabled)
++		return;
++
++	kthread_flush_worker(&sf_policy->worker);
++	kthread_stop(sf_policy->thread);
++	mutex_destroy(&sf_policy->work_lock);
++}
++
++static int snowflake_init(struct cpufreq_policy *policy)
++{
++	struct snowflake_policy *sf_policy;
++	int ret;
++
++	if (policy->governor_data)
++		return -EBUSY;
++
++	cpufreq_enable_fast_switch(policy);
++
++	sf_policy = snowflake_policy_alloc(policy);
++	if (!sf_policy) {
++		ret = -ENOMEM;
++		goto disable_fast_switch;
++	}
++
++	ret = snowflake_kthread_create(sf_policy);
++	if (ret)
++		goto free_policy;
++
++	policy->governor_data = sf_policy;
++	return 0;
++
++free_policy:
++	kfree(sf_policy);
++disable_fast_switch:
++	cpufreq_disable_fast_switch(policy);
++	pr_err("initialization failed (error %d)\n", ret);
++	return ret;
++}
++
++static void snowflake_exit(struct cpufreq_policy *policy)
++{
++	struct snowflake_policy *sf_policy = policy->governor_data;
++
++	policy->governor_data = NULL;
++	snowflake_kthread_stop(sf_policy);
++	kfree(sf_policy);
++	cpufreq_disable_fast_switch(policy);
++}
++
++static int snowflake_start(struct cpufreq_policy *policy)
++{
++	struct snowflake_policy *sf_policy = policy->governor_data;
++	unsigned int cpu;
++
++	snowflake_refresh_rate_limits(sf_policy);
++	sf_policy->last_freq_update_time = 0;
++	sf_policy->next_freq = UINT_MAX;
++	sf_policy->work_in_progress = false;
++	sf_policy->need_freq_update = false;
++	sf_policy->cached_raw_freq = 0;
++
++	for_each_cpu(cpu, policy->cpus) {
++		struct snowflake_cpu *sf_cpu = &per_cpu(snowflake_cpu, cpu);
++
++		memset(sf_cpu, 0, sizeof(*sf_cpu));
++		sf_cpu->cpu = cpu;
++		sf_cpu->sf_policy = sf_policy;
++		sf_cpu->flags = SCHED_CPUFREQ_DL;
++		sf_cpu->iowait_boost_max = capacity_orig_of(cpu);
++		sf_cpu->min_boost = (SCHED_CAPACITY_SCALE * policy->cpuinfo.min_freq) /
++				    policy->cpuinfo.max_freq;
++	}
++
++	for_each_cpu(cpu, policy->cpus) {
++		struct snowflake_cpu *sf_cpu = &per_cpu(snowflake_cpu, cpu);
++
++		cpufreq_add_update_util_hook(cpu, &sf_cpu->update_util,
++			policy_is_shared(policy) ? snowflake_update_shared :
++						   snowflake_update_single);
++	}
++
++	return 0;
++}
++
++static void snowflake_stop(struct cpufreq_policy *policy)
++{
++	struct snowflake_policy *sf_policy = policy->governor_data;
++	unsigned int cpu;
++
++	for_each_cpu(cpu, policy->cpus)
++		cpufreq_remove_update_util_hook(cpu);
++
++	synchronize_sched();
++
++	if (!policy->fast_switch_enabled) {
++		irq_work_sync(&sf_policy->irq_work);
++		kthread_cancel_work_sync(&sf_policy->work);
++	}
++}
++
++static void snowflake_limits(struct cpufreq_policy *policy)
++{
++	struct snowflake_policy *sf_policy = policy->governor_data;
++
++	if (!policy->fast_switch_enabled) {
++		mutex_lock(&sf_policy->work_lock);
++		cpufreq_policy_apply_limits(policy);
++		mutex_unlock(&sf_policy->work_lock);
++	}
++
++	sf_policy->need_freq_update = true;
++}
++
++static struct cpufreq_governor snowflake_gov = {
++	.name = "snowflake",
++	.owner = THIS_MODULE,
++	.dynamic_switching = true,
++	.init = snowflake_init,
++	.exit = snowflake_exit,
++	.start = snowflake_start,
++	.stop = snowflake_stop,
++	.limits = snowflake_limits,
++};
++
++static int __init snowflake_register(void)
++{
++	return cpufreq_register_governor(&snowflake_gov);
++}
++core_initcall(snowflake_register);
++
++MODULE_AUTHOR("ChatGPT");
++MODULE_DESCRIPTION("Snowflake schedutil-based CPUFreq governor for Android kernels");
++MODULE_LICENSE("GPL v2");
