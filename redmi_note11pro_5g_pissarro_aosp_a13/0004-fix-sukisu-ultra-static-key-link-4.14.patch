@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ChatGPT <noreply@example.com>
+Date: Sat, 25 Apr 2026 05:10:00 -0700
+Subject: [PATCH] sukisu: define missing static hook keys for 4.14 link
+
+Some 4.14 non-GKI SukiSU/SUSFS hook patch combinations leave static
+branch users in fs/stat.c and drivers/input/input.c, and also reference
+input/init-rc hook keys from ksu.c, but the SukiSU v4.1.x builtin tree may
+not provide the matching definitions. The result is a final link failure:
+
+  undefined symbol: ksu_input_hook_key_false
+  undefined symbol: ksu_init_rc_hook_key_false
+  undefined symbol: ksu_is_input_hook_enabled
+  undefined symbol: ksu_is_init_rc_hook_enabled
+
+Provide the missing static key objects in the KernelSU translation unit so
+all patched objects can resolve them.
+---
+ drivers/kernelsu/ksu.c | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/drivers/kernelsu/ksu.c b/drivers/kernelsu/ksu.c
+--- a/drivers/kernelsu/ksu.c
++++ b/drivers/kernelsu/ksu.c
+@@ -1,6 +1,7 @@
+ #include <linux/export.h>
+ #include <linux/fs.h>
+ #include <linux/kobject.h>
++#include <linux/jump_label.h>
+ #include <linux/module.h>
+ #include <linux/workqueue.h>
+ #include "allowlist.h"
+@@ -30,6 +31,32 @@
+ #endif
+ 
+ struct cred *ksu_cred;
++
++/*
++ * Compatibility for SukiSU Ultra v4.1.x builtin on 4.14 non-GKI trees.
++ *
++ * Some inline/manual hook patchers add static_branch users to core kernel
++ * files, but the matching static key definitions may be missing from the
++ * SukiSU tree selected by the build workflow.  Keep both known naming
++ * schemes here: the direct hook state names used by the patched kernel files
++ * and the *_key_false names referenced by older builtin helper code.
++ */
++DEFINE_STATIC_KEY_FALSE(ksu_is_input_hook_enabled);
++DEFINE_STATIC_KEY_FALSE(ksu_is_init_rc_hook_enabled);
++DEFINE_STATIC_KEY_FALSE(ksu_input_hook_key_false);
++DEFINE_STATIC_KEY_FALSE(ksu_init_rc_hook_key_false);
++
++EXPORT_SYMBOL(ksu_is_input_hook_enabled);
++EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);
++EXPORT_SYMBOL(ksu_input_hook_key_false);
++EXPORT_SYMBOL(ksu_init_rc_hook_key_false);
++
+ void sukisu_custom_config_init(void)
+ {
+ }
+-- 
+2.43.0
