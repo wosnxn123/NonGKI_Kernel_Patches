@@ -1,0 +1,77 @@
+From 9c23f2bca1225a4f235ae056a5e5b1c0a1e9bb51 Mon Sep 17 00:00:00 2001
+From: ChatGPT <noreply@example.com>
+Date: Sat, 25 Apr 2026 21:30:00 +0800
+Subject: [PATCH] seccomp: allow SukiSU reboot supercall through app seccomp
+
+SukiSU Ultra installs its userspace fd through a reboot kprobe. On
+Android 13 the manager-spawned libksud process runs under the app
+seccomp filter, and the reboot syscall can be killed by seccomp before
+it reaches the reboot kprobe.
+
+Allow only the SukiSU magic reboot supercall (0xDEADBEEF/0xCAFEBABE) to
+pass seccomp so the existing SukiSU reboot kprobe can handle it. Normal
+reboot calls and non-magic calls still go through the original seccomp
+path.
+
+Signed-off-by: ChatGPT <noreply@example.com>
+---
+ kernel/seccomp.c | 36 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/kernel/seccomp.c b/kernel/seccomp.c
+index 000000000000..111111111111 100644
+--- a/kernel/seccomp.c
++++ b/kernel/seccomp.c
+@@ -3566,6 +3566,38 @@ static int __seccomp_filter(int this_syscall, const struct seccomp_data *sd,
+ }
+ #endif
+ 
++/*
++ * SukiSU Ultra uses a reboot() kprobe supercall to install the anonymous
++ * /dev-like fd used by userspace. On Android 13, app processes have seccomp
++ * enabled and the reboot syscall can be killed before the kprobe sees it.
++ *
++ * Only bypass seccomp for SukiSU's exact magic reboot supercall.  This keeps
++ * normal reboot syscalls filtered as before.
++ */
++#ifndef __NR_reboot
++#define __NR_reboot 142
++#endif
++
++#define SUKISU_SUPERCALL_MAGIC1 0xDEADBEEFUL
++#define SUKISU_SUPERCALL_MAGIC2 0xCAFEBABEUL
++
++static bool sukisu_seccomp_is_reboot_supercall(int this_syscall,
++					       const struct seccomp_data *sd)
++{
++	unsigned long args[2];
++
++	if (this_syscall != __NR_reboot)
++		return false;
++
++	if (sd)
++		return sd->args[0] == SUKISU_SUPERCALL_MAGIC1 &&
++		       sd->args[1] == SUKISU_SUPERCALL_MAGIC2;
++
++	syscall_get_arguments(current, task_pt_regs(current), 0, 2, args);
++
++	return args[0] == SUKISU_SUPERCALL_MAGIC1 &&
++	       args[1] == SUKISU_SUPERCALL_MAGIC2;
++}
++
+ int __secure_computing(const struct seccomp_data *sd)
+ {
+ 	int mode = current->seccomp.mode;
+@@ -3583,6 +3615,10 @@ int __secure_computing(const struct seccomp_data *sd)
+ 	this_syscall = sd ? sd->nr :
+ 		syscall_get_nr(current, task_pt_regs(current));
+ 
++	/* Let SukiSU's reboot magic reach the reboot kprobe. */
++	if (sukisu_seccomp_is_reboot_supercall(this_syscall, sd))
++		return 0;
++
+ 	switch (mode) {
+ 	case SECCOMP_MODE_STRICT:
+ 		__secure_computing_strict(this_syscall); /* may call do_exit */
+-- 
+2.43.0
