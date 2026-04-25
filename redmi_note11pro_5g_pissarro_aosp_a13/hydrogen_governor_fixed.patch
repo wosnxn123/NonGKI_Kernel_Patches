@@ -1,0 +1,760 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ChatGPT <noreply@example.com>
+Date: Sat, 25 Apr 2026 00:00:00 +0800
+Subject: [PATCH] cpufreq: add hydrogen governor
+
+Add the hydrogen cpufreq governor for Android/MTK latency-sensitive
+workloads. The governor is built by default when CPU_FREQ is enabled,
+but it does not replace the existing default governor. Users can switch
+to it at runtime from sysfs or tools such as Scene/Scenes.
+
+Enable CONFIG_CPU_FREQ_GOV_HYDROGEN in pissarro_defconfig so this patch
+can be used directly as a workflow fixed/custom patch.
+
+---
+ arch/arm64/configs/pissarro_defconfig |    1 +
+ drivers/cpufreq/Kconfig            |   29 +++
+ drivers/cpufreq/Makefile           |    1 +
+ drivers/cpufreq/cpufreq_hydrogen.c |  662 +++++++++++++++++++++++++++++
+ 4 files changed, 693 insertions(+)
+ create mode 100644 drivers/cpufreq/cpufreq_hydrogen.c
+
+diff --git a/arch/arm64/configs/pissarro_defconfig b/arch/arm64/configs/pissarro_defconfig
+--- a/arch/arm64/configs/pissarro_defconfig
++++ b/arch/arm64/configs/pissarro_defconfig
+@@ -427,6 +427,7 @@ CONFIG_CPU_FREQ_GOV_CONSERVATIVE=y
+ CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+ CONFIG_CPU_FREQ_GOV_BLU_SCHEDUTIL=y
+ CONFIG_CPU_FREQ_GOV_ELECTROUTIL=y
+ CONFIG_CPU_FREQ_GOV_HELIX=y
++CONFIG_CPU_FREQ_GOV_HYDROGEN=y
+ # CONFIG_CPU_FREQ_GOV_ZSCHEDUTIL is not set
+ # CONFIG_NONLINEAR_FREQ_CTL is not set
+ CONFIG_MTK_CPU_FREQ=y
+
+diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
+--- a/drivers/cpufreq/Kconfig
++++ b/drivers/cpufreq/Kconfig
+@@ -96,6 +96,17 @@ config CPU_FREQ_DEFAULT_GOV_INTERACTIVE
+ 	  loading your cpufreq low-level hardware driver, using the
+ 	  'interactive' governor for latency-sensitive workloads.
+ 
++config CPU_FREQ_DEFAULT_GOV_HYDROGEN
++	bool "hydrogen"
++	select CPU_FREQ_GOV_HYDROGEN
++	select CPU_FREQ_GOV_PERFORMANCE
++	help
++	  Use the CPUFreq governor 'hydrogen' as default. Hydrogen is a
++	  tunable hybrid governor for Android latency-sensitive workloads.
++	  It includes hispeed jumps, boostpulse, controlled ramp-down,
++	  proportional target-load scaling, IO-wait awareness and tunable
++	  performance/powersave bias.
++
+ config CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+ 	bool "schedutil"
+ 	depends on SMP
+@@ -165,6 +176,23 @@ config CPU_FREQ_GOV_CONSERVATIVE
+ 
+ 	  If in doubt, say N.
+ 
++config CPU_FREQ_GOV_HYDROGEN
++	bool "'hydrogen' cpufreq policy governor"
++	depends on CPU_FREQ
++	default y
++	select CPU_FREQ_GOV_COMMON
++	select CPU_FREQ_GOV_ATTR_SET
++	help
++	  Hydrogen is a tunable hybrid governor for Android kernels. It
++	  combines ondemand-style load tracking, interactive-style hispeed
++	  jumps and boostpulse, conservative-style ramp-down, and
++	  target-load proportional scaling.
++
++	  This option makes the 'hydrogen' governor available at runtime,
++	  for example through /sys/devices/system/cpu/cpufreq/policy*/
++	  scaling_governor or tuning apps such as Scene/Scenes. It does
++	  not change the default governor unless selected above.
++
+ config CPU_FREQ_GOV_SCHEDUTIL
+ 	bool "'schedutil' cpufreq policy governor"
+ 	depends on CPU_FREQ && SMP
+
+diff --git a/drivers/cpufreq/Makefile b/drivers/cpufreq/Makefile
+--- a/drivers/cpufreq/Makefile
++++ b/drivers/cpufreq/Makefile
+@@ -19,6 +19,7 @@ obj-$(CONFIG_CPU_FREQ_GOV_ONDEMAND)	+= cpufreq_ondemand.o
+ obj-$(CONFIG_CPU_FREQ_GOV_CONSERVATIVE)	+= cpufreq_conservative.o
+ obj-$(CONFIG_CPU_FREQ_GOV_INTERACTIVE)	+= cpufreq_interactive.o
++obj-$(CONFIG_CPU_FREQ_GOV_HYDROGEN)	+= cpufreq_hydrogen.o
+ obj-$(CONFIG_CPU_FREQ_GOV_COMMON)		+= cpufreq_governor.o
+ obj-$(CONFIG_CPU_FREQ_GOV_ATTR_SET)	+= cpufreq_governor_attr_set.o
+ 
+
+diff --git a/drivers/cpufreq/cpufreq_hydrogen.c b/drivers/cpufreq/cpufreq_hydrogen.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/cpufreq/cpufreq_hydrogen.c
+@@ -0,0 +1,662 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Hydrogen CPUFreq governor for Android/MTK kernels.
++ *
++ * A tunable hybrid governor built on the kernel's dbs governor core:
++ * - ondemand-style load tracking through dbs_update()
++ * - interactive-style hispeed jump and boostpulse
++ * - conservative-style controlled ramp-down
++ * - schedutil-inspired target-load frequency selection
++ *
++ * This intentionally does not copy code from third-party kernels.  It uses
++ * the GPL-2.0 cpufreq governor framework already present in this tree.
++ */
++
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
++
++#include <linux/cpufreq.h>
++#include <linux/init.h>
++#include <linux/kernel.h>
++#include <linux/limits.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++
++#include "cpufreq_governor.h"
++
++#define DEF_UP_THRESHOLD          68
++#define DEF_DOWN_THRESHOLD        28
++#define DEF_TARGET_LOAD           75
++#define DEF_GO_HISPEED_LOAD       88
++#define DEF_BOOST_LOAD            96
++#define DEF_FREQ_STEP             8
++#define DEF_SAMPLING_DOWN_FACTOR  2
++#define DEF_POWERSAVE_BIAS        0
++#define DEF_BOOSTPULSE_SAMPLES    6
++#define DEF_FAST_RAMP_DOWN        1
++
++#define MIN_THRESHOLD             1
++#define MAX_THRESHOLD             100
++#define MIN_TARGET_LOAD           10
++#define MAX_TARGET_LOAD           100
++#define MAX_FREQ_STEP             100
++#define MAX_POWERSAVE_BIAS        1000
++#define MAX_SAMPLING_DOWN_FACTOR  1000
++#define MAX_BOOSTPULSE_SAMPLES    1000
++
++#define gov_attr_wo(_name) \
++static struct governor_attr _name = \
++__ATTR(_name, 0200, NULL, store_##_name)
++
++struct hydrogen_policy_dbs_info {
++	struct policy_dbs_info policy_dbs;
++	unsigned int requested_freq;
++	unsigned int down_skip;
++	unsigned int boostpulse_samples_left;
++};
++
++static inline struct hydrogen_policy_dbs_info *to_hydrogen_dbs_info(
++		struct policy_dbs_info *policy_dbs)
++{
++	return container_of(policy_dbs, struct hydrogen_policy_dbs_info,
++				policy_dbs);
++}
++
++struct hydrogen_dbs_tuners {
++	unsigned int down_threshold;
++	unsigned int target_load;
++	unsigned int go_hispeed_load;
++	unsigned int boost_load;
++	unsigned int hispeed_freq;
++	unsigned int freq_step;
++	unsigned int powersave_bias;
++	unsigned int boost;
++	unsigned int boostpulse_samples;
++	unsigned int fast_ramp_down;
++};
++
++static unsigned int clamp_freq(struct cpufreq_policy *policy, unsigned int freq)
++{
++	return clamp_t(unsigned int, freq, policy->min, policy->max);
++}
++
++static unsigned int hydrogen_step(struct cpufreq_policy *policy,
++		struct hydrogen_dbs_tuners *tuners)
++{
++	unsigned int step;
++
++	if (!tuners->freq_step)
++		return 0;
++
++	step = (policy->max * tuners->freq_step) / 100;
++	if (!step)
++		step = 1;
++
++	return step;
++}
++
++static unsigned int hydrogen_add_step(struct cpufreq_policy *policy,
++		unsigned int freq, unsigned int step)
++{
++	if (!step)
++		return freq;
++	if (freq >= policy->max || step > policy->max - freq)
++		return policy->max;
++	return freq + step;
++}
++
++static unsigned int hydrogen_sub_step(struct cpufreq_policy *policy,
++		unsigned int freq, unsigned int step)
++{
++	if (!step)
++		return freq;
++	if (freq <= policy->min || freq - policy->min <= step)
++		return policy->min;
++	return freq - step;
++}
++
++static unsigned int hydrogen_hispeed_freq(struct cpufreq_policy *policy,
++		struct hydrogen_dbs_tuners *tuners)
++{
++	unsigned int freq;
++
++	if (tuners->hispeed_freq)
++		return clamp_freq(policy, tuners->hispeed_freq);
++
++	/* Auto hispeed: around 65% of the active policy range. */
++	freq = policy->min + ((policy->max - policy->min) * 65) / 100;
++	return clamp_freq(policy, freq);
++}
++
++static unsigned int hydrogen_freq_for_load(struct cpufreq_policy *policy,
++		unsigned int load, unsigned int target_load)
++{
++	unsigned int range = policy->max - policy->min;
++
++	if (load >= target_load)
++		return policy->max;
++
++	return clamp_freq(policy, policy->min + (range * load) / target_load);
++}
++
++static unsigned int hydrogen_apply_powersave_bias(struct cpufreq_policy *policy,
++		struct hydrogen_dbs_tuners *tuners, unsigned int freq)
++{
++	unsigned int delta;
++
++	if (!tuners->powersave_bias || freq <= policy->min)
++		return clamp_freq(policy, freq);
++
++	delta = freq - policy->min;
++	freq -= (delta * tuners->powersave_bias) / MAX_POWERSAVE_BIAS;
++
++	return clamp_freq(policy, freq);
++}
++
++static unsigned int hydrogen_choose_freq(struct cpufreq_policy *policy,
++		struct hydrogen_policy_dbs_info *dbs_info, unsigned int load)
++{
++	struct policy_dbs_info *policy_dbs = &dbs_info->policy_dbs;
++	struct dbs_data *dbs_data = policy_dbs->dbs_data;
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int requested = dbs_info->requested_freq;
++	unsigned int step = hydrogen_step(policy, tuners);
++	unsigned int hispeed = hydrogen_hispeed_freq(policy, tuners);
++	unsigned int target;
++
++	if (requested < policy->min || requested > policy->max)
++		requested = clamp_freq(policy, policy->cur ? policy->cur : policy->min);
++
++	/* Manual boost pins to max; boostpulse jumps to hispeed for N samples. */
++	if (tuners->boost || dbs_info->boostpulse_samples_left) {
++		if (dbs_info->boostpulse_samples_left)
++			dbs_info->boostpulse_samples_left--;
++		dbs_info->down_skip = 0;
++		target = tuners->boost ? policy->max : max_t(unsigned int, requested,
++					hispeed);
++		return clamp_freq(policy, target);
++	}
++
++	/* Extreme load: go directly to max, similar to performance bursts. */
++	if (load >= tuners->boost_load) {
++		dbs_info->down_skip = 0;
++		return policy->max;
++	}
++
++	/* High load: interactive-style hispeed floor plus proportional target. */
++	if (load >= tuners->go_hispeed_load) {
++		dbs_info->down_skip = 0;
++		target = hydrogen_freq_for_load(policy, load, tuners->target_load);
++		target = max_t(unsigned int, target, hispeed);
++		target = max_t(unsigned int, target,
++				hydrogen_add_step(policy, requested, step));
++		return clamp_freq(policy, target);
++	}
++
++	/* Normal ramp-up: target-load proportional scaling with a minimum step. */
++	if (load > dbs_data->up_threshold) {
++		dbs_info->down_skip = 0;
++		target = hydrogen_freq_for_load(policy, load, tuners->target_load);
++		if (step)
++			target = max_t(unsigned int, target,
++					hydrogen_add_step(policy, requested, step));
++		return clamp_freq(policy, target);
++	}
++
++	/* Controlled ramp-down: avoid oscillation and respect sampling_down_factor. */
++	if (load < tuners->down_threshold) {
++		unsigned int step_down = step;
++
++		if (++dbs_info->down_skip < dbs_data->sampling_down_factor)
++			return requested;
++
++		dbs_info->down_skip = 0;
++		target = hydrogen_freq_for_load(policy, load, tuners->target_load);
++
++		if (tuners->fast_ramp_down && step &&
++		    policy_dbs->idle_periods != UINT_MAX && policy_dbs->idle_periods > 1)
++			step_down = min_t(unsigned int, step * policy_dbs->idle_periods,
++					     policy->max - policy->min);
++
++		if (step_down)
++			target = min_t(unsigned int, target,
++					hydrogen_sub_step(policy, requested, step_down));
++
++		target = hydrogen_apply_powersave_bias(policy, tuners, target);
++		return clamp_freq(policy, target);
++	}
++
++	/* Middle band: hold current request to reduce jitter. */
++	dbs_info->down_skip = 0;
++	return requested;
++}
++
++static unsigned int hydrogen_dbs_update(struct cpufreq_policy *policy)
++{
++	struct policy_dbs_info *policy_dbs = policy->governor_data;
++	struct hydrogen_policy_dbs_info *dbs_info =
++		to_hydrogen_dbs_info(policy_dbs);
++	struct dbs_data *dbs_data = policy_dbs->dbs_data;
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int load = dbs_update(policy);
++	unsigned int target = hydrogen_choose_freq(policy, dbs_info, load);
++	unsigned int relation;
++
++	if (target > policy->cur)
++		relation = CPUFREQ_RELATION_L;
++	else if (target < policy->cur)
++		relation = CPUFREQ_RELATION_H;
++	else
++		relation = CPUFREQ_RELATION_C;
++
++	if (target != dbs_info->requested_freq || target != policy->cur)
++		__cpufreq_driver_target(policy, target, relation);
++
++	dbs_info->requested_freq = target;
++
++	if (target == policy->min && load < tuners->down_threshold)
++		return dbs_data->sampling_rate * dbs_data->sampling_down_factor;
++
++	return dbs_data->sampling_rate;
++}
++
++/************************** sysfs interface ************************/
++
++static ssize_t store_io_is_busy(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1)
++		return -EINVAL;
++
++	dbs_data->io_is_busy = !!input;
++	gov_update_cpu_data(dbs_data);
++	return count;
++}
++
++static ssize_t store_ignore_nice_load(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1)
++		return -EINVAL;
++
++	input = !!input;
++	if (input == dbs_data->ignore_nice_load)
++		return count;
++
++	dbs_data->ignore_nice_load = input;
++	gov_update_cpu_data(dbs_data);
++	return count;
++}
++
++static ssize_t store_sampling_down_factor(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1 || input < 1 || input > MAX_SAMPLING_DOWN_FACTOR)
++		return -EINVAL;
++
++	dbs_data->sampling_down_factor = input;
++	return count;
++}
++
++static ssize_t store_up_threshold(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1 || input < MIN_THRESHOLD || input > MAX_THRESHOLD ||
++	    input <= tuners->down_threshold)
++		return -EINVAL;
++
++	dbs_data->up_threshold = input;
++	return count;
++}
++
++static ssize_t store_down_threshold(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1 || input < MIN_THRESHOLD || input > MAX_THRESHOLD ||
++	    input >= dbs_data->up_threshold)
++		return -EINVAL;
++
++	tuners->down_threshold = input;
++	return count;
++}
++
++static ssize_t store_target_load(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1 || input < MIN_TARGET_LOAD || input > MAX_TARGET_LOAD)
++		return -EINVAL;
++
++	tuners->target_load = input;
++	return count;
++}
++
++static ssize_t store_go_hispeed_load(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1 || input < MIN_THRESHOLD || input > MAX_THRESHOLD)
++		return -EINVAL;
++
++	tuners->go_hispeed_load = input;
++	return count;
++}
++
++static ssize_t store_boost_load(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1 || input < MIN_THRESHOLD || input > MAX_THRESHOLD)
++		return -EINVAL;
++
++	tuners->boost_load = input;
++	return count;
++}
++
++static ssize_t store_hispeed_freq(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1)
++		return -EINVAL;
++
++	/* 0 = auto, otherwise clamped per policy at runtime. */
++	tuners->hispeed_freq = input;
++	return count;
++}
++
++static ssize_t store_freq_step(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1 || input > MAX_FREQ_STEP)
++		return -EINVAL;
++
++	tuners->freq_step = input;
++	return count;
++}
++
++static ssize_t store_powersave_bias(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1 || input > MAX_POWERSAVE_BIAS)
++		return -EINVAL;
++
++	tuners->powersave_bias = input;
++	return count;
++}
++
++static ssize_t store_boost(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	struct policy_dbs_info *policy_dbs;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1)
++		return -EINVAL;
++
++	tuners->boost = !!input;
++	list_for_each_entry(policy_dbs, &attr_set->policy_list, list) {
++		mutex_lock(&policy_dbs->update_mutex);
++		gov_update_sample_delay(policy_dbs, 0);
++		mutex_unlock(&policy_dbs->update_mutex);
++	}
++	return count;
++}
++
++static ssize_t store_boostpulse_samples(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1 || input < 1 || input > MAX_BOOSTPULSE_SAMPLES)
++		return -EINVAL;
++
++	tuners->boostpulse_samples = input;
++	return count;
++}
++
++static ssize_t store_fast_ramp_down(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++	int ret = sscanf(buf, "%u", &input);
++
++	if (ret != 1)
++		return -EINVAL;
++
++	tuners->fast_ramp_down = !!input;
++	return count;
++}
++
++static ssize_t store_boostpulse(struct gov_attr_set *attr_set,
++		const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hydrogen_dbs_tuners *tuners = dbs_data->tuners;
++	struct policy_dbs_info *policy_dbs;
++	unsigned int ignored;
++
++	/* Any write triggers a pulse; accept both "1" and arbitrary payloads. */
++	sscanf(buf, "%u", &ignored);
++
++	list_for_each_entry(policy_dbs, &attr_set->policy_list, list) {
++		struct hydrogen_policy_dbs_info *dbs_info =
++			to_hydrogen_dbs_info(policy_dbs);
++
++		mutex_lock(&policy_dbs->update_mutex);
++		dbs_info->boostpulse_samples_left = tuners->boostpulse_samples;
++		gov_update_sample_delay(policy_dbs, 0);
++		mutex_unlock(&policy_dbs->update_mutex);
++	}
++	return count;
++}
++
++gov_show_one_common(sampling_rate);
++gov_show_one_common(sampling_down_factor);
++gov_show_one_common(up_threshold);
++gov_show_one_common(ignore_nice_load);
++gov_show_one_common(io_is_busy);
++
++gov_show_one(hydrogen, down_threshold);
++gov_show_one(hydrogen, target_load);
++gov_show_one(hydrogen, go_hispeed_load);
++gov_show_one(hydrogen, boost_load);
++gov_show_one(hydrogen, hispeed_freq);
++gov_show_one(hydrogen, freq_step);
++gov_show_one(hydrogen, powersave_bias);
++gov_show_one(hydrogen, boost);
++gov_show_one(hydrogen, boostpulse_samples);
++gov_show_one(hydrogen, fast_ramp_down);
++
++gov_attr_rw(sampling_rate);
++gov_attr_rw(sampling_down_factor);
++gov_attr_rw(up_threshold);
++gov_attr_rw(ignore_nice_load);
++gov_attr_rw(io_is_busy);
++
++gov_attr_rw(down_threshold);
++gov_attr_rw(target_load);
++gov_attr_rw(go_hispeed_load);
++gov_attr_rw(boost_load);
++gov_attr_rw(hispeed_freq);
++gov_attr_rw(freq_step);
++gov_attr_rw(powersave_bias);
++gov_attr_rw(boost);
++gov_attr_rw(boostpulse_samples);
++gov_attr_rw(fast_ramp_down);
++gov_attr_wo(boostpulse);
++
++static struct attribute *hydrogen_attributes[] = {
++	&sampling_rate.attr,
++	&sampling_down_factor.attr,
++	&up_threshold.attr,
++	&down_threshold.attr,
++	&target_load.attr,
++	&go_hispeed_load.attr,
++	&boost_load.attr,
++	&hispeed_freq.attr,
++	&freq_step.attr,
++	&powersave_bias.attr,
++	&boost.attr,
++	&boostpulse.attr,
++	&boostpulse_samples.attr,
++	&fast_ramp_down.attr,
++	&ignore_nice_load.attr,
++	&io_is_busy.attr,
++	NULL
++};
++
++/************************** sysfs end ************************/
++
++static struct policy_dbs_info *hydrogen_alloc(void)
++{
++	struct hydrogen_policy_dbs_info *dbs_info;
++
++	dbs_info = kzalloc(sizeof(*dbs_info), GFP_KERNEL);
++	return dbs_info ? &dbs_info->policy_dbs : NULL;
++}
++
++static void hydrogen_free(struct policy_dbs_info *policy_dbs)
++{
++	kfree(to_hydrogen_dbs_info(policy_dbs));
++}
++
++static int hydrogen_init(struct dbs_data *dbs_data)
++{
++	struct hydrogen_dbs_tuners *tuners;
++
++	tuners = kzalloc(sizeof(*tuners), GFP_KERNEL);
++	if (!tuners)
++		return -ENOMEM;
++
++	tuners->down_threshold = DEF_DOWN_THRESHOLD;
++	tuners->target_load = DEF_TARGET_LOAD;
++	tuners->go_hispeed_load = DEF_GO_HISPEED_LOAD;
++	tuners->boost_load = DEF_BOOST_LOAD;
++	tuners->hispeed_freq = 0;
++	tuners->freq_step = DEF_FREQ_STEP;
++	tuners->powersave_bias = DEF_POWERSAVE_BIAS;
++	tuners->boost = 0;
++	tuners->boostpulse_samples = DEF_BOOSTPULSE_SAMPLES;
++	tuners->fast_ramp_down = DEF_FAST_RAMP_DOWN;
++
++	dbs_data->up_threshold = DEF_UP_THRESHOLD;
++	dbs_data->sampling_down_factor = DEF_SAMPLING_DOWN_FACTOR;
++	dbs_data->ignore_nice_load = 0;
++	/* App launches and UFS bursts usually benefit from treating iowait as busy. */
++	dbs_data->io_is_busy = 1;
++	dbs_data->tuners = tuners;
++
++	return 0;
++}
++
++static void hydrogen_exit(struct dbs_data *dbs_data)
++{
++	kfree(dbs_data->tuners);
++}
++
++static void hydrogen_start(struct cpufreq_policy *policy)
++{
++	struct hydrogen_policy_dbs_info *dbs_info =
++		to_hydrogen_dbs_info(policy->governor_data);
++
++	dbs_info->requested_freq = clamp_freq(policy,
++				policy->cur ? policy->cur : policy->min);
++	dbs_info->down_skip = 0;
++	dbs_info->boostpulse_samples_left = 0;
++}
++
++static struct dbs_governor hydrogen_governor = {
++	.gov = CPUFREQ_DBS_GOVERNOR_INITIALIZER("hydrogen"),
++	.kobj_type = {
++		.default_attrs = hydrogen_attributes,
++	},
++	.gov_dbs_update = hydrogen_dbs_update,
++	.alloc = hydrogen_alloc,
++	.free = hydrogen_free,
++	.init = hydrogen_init,
++	.exit = hydrogen_exit,
++	.start = hydrogen_start,
++};
++
++#define CPU_FREQ_GOV_HYDROGEN (&hydrogen_governor.gov)
++
++static int __init cpufreq_gov_hydrogen_init(void)
++{
++	return cpufreq_register_governor(CPU_FREQ_GOV_HYDROGEN);
++}
++
++static void __exit cpufreq_gov_hydrogen_exit(void)
++{
++	cpufreq_unregister_governor(CPU_FREQ_GOV_HYDROGEN);
++}
++
++MODULE_AUTHOR("Hydrogen Kernel community");
++MODULE_DESCRIPTION("CPUfreq policy governor 'hydrogen'");
++MODULE_LICENSE("GPL");
++
++#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGEN
++struct cpufreq_governor *cpufreq_default_governor(void)
++{
++	return CPU_FREQ_GOV_HYDROGEN;
++}
++core_initcall(cpufreq_gov_hydrogen_init);
++#else
++module_init(cpufreq_gov_hydrogen_init);
++#endif
++module_exit(cpufreq_gov_hydrogen_exit);
+-- 
+2.43.0
