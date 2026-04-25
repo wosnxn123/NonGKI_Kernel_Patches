@@ -1,0 +1,70 @@
+From 7c0a0d70a1674cbb0f12db5a9dd5d6310b971006 Mon Sep 17 00:00:00 2001
+From: ChatGPT <noreply@example.com>
+Date: Sat, 25 Apr 2026 22:20:00 +0800
+Subject: [PATCH] arm64: bypass seccomp for SukiSU reboot supercall
+
+The generic seccomp bypass is not enough on some 4.14 arm64 Android
+entry paths. SukiSU Ultra's manager-spawned libksud uses reboot syscall
+142 with magic args 0xDEADBEEF/0xCAFEBABE so the reboot kprobe can
+install the userspace fd. On Android 13, app seccomp kills this syscall
+before it can reach the kprobe.
+
+Bypass secure_computing() at the arm64 syscall entry only for the exact
+SukiSU magic reboot supercall. Normal reboot syscalls and all other
+syscalls still go through the normal seccomp path.
+
+Signed-off-by: ChatGPT <noreply@example.com>
+---
+ arch/arm64/kernel/ptrace.c | 29 ++++++++++++++++++++++++++++-
+ 1 file changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/kernel/ptrace.c b/arch/arm64/kernel/ptrace.c
+index 000000000000..222222222222 100644
+--- a/arch/arm64/kernel/ptrace.c
++++ b/arch/arm64/kernel/ptrace.c
+@@ -1838,6 +1838,32 @@ static void tracehook_report_syscall(struct pt_regs *regs,
+ 	regs->regs[regno] = saved_reg;
+ }
+ 
++#ifndef __NR_reboot
++#define __NR_reboot 142
++#endif
++
++#define SUKISU_SUPERCALL_MAGIC1 0xDEADBEEFUL
++#define SUKISU_SUPERCALL_MAGIC2 0xCAFEBABEUL
++
++/*
++ * SukiSU Ultra userspace reaches the kernel through a reboot() kprobe
++ * supercall. App seccomp on Android 13 blocks reboot before the kprobe
++ * can see it, so skip seccomp only for SukiSU's exact magic call.
++ */
++static inline bool sukisu_arm64_is_reboot_supercall(struct pt_regs *regs)
++{
++	unsigned long arg0 = regs->regs[0];
++	unsigned long arg1 = regs->regs[1];
++
++	if (regs->syscallno != __NR_reboot)
++		return false;
++
++	/* orig_x0 is the original first syscall argument on arm64. */
++	if (regs->orig_x0 == SUKISU_SUPERCALL_MAGIC1)
++		arg0 = regs->orig_x0;
++
++	return arg0 == SUKISU_SUPERCALL_MAGIC1 &&
++	       arg1 == SUKISU_SUPERCALL_MAGIC2;
++}
++
+ asmlinkage int syscall_trace_enter(struct pt_regs *regs)
+ {
+ 	if (test_thread_flag(TIF_SYSCALL_TRACE))
+@@ -1845,7 +1871,8 @@ asmlinkage int syscall_trace_enter(struct pt_regs *regs)
+ 
+ 	/* Do the secure computing after ptrace; failures should be fast. */
+-	if (secure_computing(NULL) == -1)
++	if (!sukisu_arm64_is_reboot_supercall(regs) &&
++	    secure_computing(NULL) == -1)
+ 		return -1;
+ 
+ 	if (test_thread_flag(TIF_SYSCALL_TRACEPOINT))
+-- 
+2.43.0
