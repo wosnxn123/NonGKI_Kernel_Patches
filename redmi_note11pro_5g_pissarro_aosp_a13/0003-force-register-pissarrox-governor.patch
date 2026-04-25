@@ -1,0 +1,48 @@
+From 8b7545e873cd8a3f1e8c0b0c3655a5ef23b7aa31 Mon Sep 17 00:00:00 2001
+From: ChatGPT <chatgpt@example.com>
+Date: Sat, 25 Apr 2026 13:30:00 -0700
+Subject: [PATCH] cpufreq: force-build pissarrox governor and log registration
+
+Some Android kernel build flows keep an old .config or merge fragments after
+pissarro_defconfig, which can leave CONFIG_CPU_FREQ_GOV_PISSARROX unset even
+when the governor source has been added.  Build the governor whenever CPUFreq
+is enabled so it is registered and visible in scaling_available_governors.
+
+Also print a short boot log line so users can verify registration from dmesg.
+---
+ kernel/sched/Makefile            | 2 +-
+ kernel/sched/cpufreq_pissarrox.c | 9 ++++++++-
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
+index 111111111111..222222222222 100644
+--- a/kernel/sched/Makefile
++++ b/kernel/sched/Makefile
+@@ -24,4 +24,4 @@ obj-$(CONFIG_CGROUP_CPUACCT) += cpuacct.o
+ obj-$(CONFIG_CPU_FREQ) += cpufreq.o
+ obj-$(CONFIG_CPU_FREQ_GOV_SCHEDUTIL) += cpufreq_schedutil.o
+-obj-$(CONFIG_CPU_FREQ_GOV_PISSARROX) += cpufreq_pissarrox.o
++obj-$(CONFIG_CPU_FREQ) += cpufreq_pissarrox.o
+ obj-$(CONFIG_MEMBARRIER) += membarrier.o
+diff --git a/kernel/sched/cpufreq_pissarrox.c b/kernel/sched/cpufreq_pissarrox.c
+index 43f761e90a92..8d7d125fb04 100644
+--- a/kernel/sched/cpufreq_pissarrox.c
++++ b/kernel/sched/cpufreq_pissarrox.c
+@@ -1005,7 +1005,14 @@ struct cpufreq_governor *cpufreq_default_governor(void)
+ 
+ static int __init pxgov_register(void)
+ {
+-	return cpufreq_register_governor(&pissarrox_gov);
++	int ret;
++
++	ret = cpufreq_register_governor(&pissarrox_gov);
++	if (ret)
++		pr_err("failed to register governor pissarrox: %d\n", ret);
++	else
++		pr_info("registered governor pissarrox\n");
++
++	return ret;
+ }
+ core_initcall(pxgov_register);
+-- 
+2.43.0
