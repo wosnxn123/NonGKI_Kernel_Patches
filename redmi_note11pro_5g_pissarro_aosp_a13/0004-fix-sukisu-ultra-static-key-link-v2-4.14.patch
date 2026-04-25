@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ChatGPT <noreply@example.com>
+Date: Sat, 25 Apr 2026 05:30:00 -0700
+Subject: [PATCH] sukisu: provide missing static hook keys in standalone object
+
+SukiSU Ultra v4.1.x on some 4.14 non-GKI trees can leave static branch
+users in patched core files while the matching hook static-key definitions
+are not linked into vmlinux.  The final link then fails with undefined
+symbols such as:
+
+  ksu_input_hook_key_false
+  ksu_init_rc_hook_key_false
+  ksu_is_input_hook_enabled
+  ksu_is_init_rc_hook_enabled
+
+Define the missing keys in a tiny standalone object and always build it
+when drivers/kernelsu is visited.  This is less fragile than inserting the
+definitions into ksu.c because SukiSU's ksu.c layout changes frequently.
+---
+ drivers/kernelsu/Makefile         |  2 ++
+ drivers/kernelsu/ksu_static_keys.c | 34 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+ create mode 100644 drivers/kernelsu/ksu_static_keys.c
+
+diff --git a/drivers/kernelsu/Makefile b/drivers/kernelsu/Makefile
+--- a/drivers/kernelsu/Makefile
++++ b/drivers/kernelsu/Makefile
+@@ -1,0 +1,2 @@
++obj-y += ksu_static_keys.o
++
+diff --git a/drivers/kernelsu/ksu_static_keys.c b/drivers/kernelsu/ksu_static_keys.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/kernelsu/ksu_static_keys.c
+@@ -0,0 +1,34 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * SukiSU Ultra 4.14 non-GKI compatibility glue.
++ *
++ * Some inline/manual hook patch combinations emit static_branch users in
++ * fs/stat.c, drivers/input/input.c and drivers/kernelsu/ksu.c, but the SukiSU
++ * tree selected by the build workflow does not always provide the matching
++ * static key definitions.  Keep the known symbol names here so final vmlinux
++ * link can resolve them.
++ */
++
++#include <linux/export.h>
++#include <linux/jump_label.h>
++
++/*
++ * Names referenced by patched core kernel files through __jump_table.
++ */
++DEFINE_STATIC_KEY_FALSE(ksu_is_input_hook_enabled);
++DEFINE_STATIC_KEY_FALSE(ksu_is_init_rc_hook_enabled);
++
++/*
++ * Names referenced by SukiSU helper code on older 4.14 hook layouts.
++ */
++DEFINE_STATIC_KEY_FALSE(ksu_input_hook_key_false);
++DEFINE_STATIC_KEY_FALSE(ksu_init_rc_hook_key_false);
++
++EXPORT_SYMBOL(ksu_is_input_hook_enabled);
++EXPORT_SYMBOL(ksu_is_init_rc_hook_enabled);
++EXPORT_SYMBOL(ksu_input_hook_key_false);
++EXPORT_SYMBOL(ksu_init_rc_hook_key_false);
++
++/* Anchor this translation unit even when LTO/GC is aggressive. */
++void ksu_static_keys_compat_anchor(void) { }
++EXPORT_SYMBOL(ksu_static_keys_compat_anchor);
+-- 
+2.43.0
