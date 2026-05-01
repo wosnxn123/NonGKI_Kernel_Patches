@@ -1,0 +1,3439 @@
+From 0000000000000000000000000000000000000010 Mon Sep 17 00:00:00 2001
+From: ChatGPT <patches@example.invalid>
+Date: Fri, 1 May 2026 00:00:00 +0000
+Subject: [PATCH v10] hydrogenx: audited clean-tree governor and boost stack for pissarro
+
+This v10 replaces the oversized v7/v8/v9 atlas patches with a useful-only
+clean-tree patch. It keeps the kernel-side changes that have an execution path
+in the booted kernel and removes the giant offline CSV/profile ballast.
+
+Kept: HydrogenX cpufreq governor, /sys/kernel/hydrogenx boost controller,
+input/frame scene boosts, existing MediaTek tune_plus SchedTune/UCLAMP bridge,
+pissarro defconfig defaults, zram LZ4 default, f2fs/erofs/zram/lz4/zstd/bbr
+configuration, and compact verification scripts.
+
+Removed: giant CSV/profile atlases and oversized documentation. LZ4K/LZ4KD/
+OPLUS entries, if present in this patch, are compatibility Kconfig aliases to
+stock LZ4 only; they are not a real codec implementation.
+
+---
+diff --git a/arch/arm64/configs/pissarro_debug_defconfig b/arch/arm64/configs/pissarro_debug_defconfig
+index 000000000000..000000000000 100644
+--- a/arch/arm64/configs/pissarro_debug_defconfig
++++ b/arch/arm64/configs/pissarro_debug_defconfig
+@@ -1399,11 +1399,55 @@ CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+ CONFIG_CPU_FREQ=y
+ 
+ CONFIG_CPU_FREQ_STAT=y
+ 
+-CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
++CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX=y
+ 
+ CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+ 
+ CONFIG_CPU_FREQ_GOV_USERSPACE=y
+ 
+ CONFIG_CPU_FREQ_GOV_ONDEMAND=y
++
++CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
++
++CONFIG_CPU_FREQ_GOV_HYDROGENX=y
++CONFIG_HYDROGENX_BOOST=y
++CONFIG_ZRAM=y
++CONFIG_ZRAM_WRITEBACK=y
++CONFIG_ZRAM_MEMORY_TRACKING=y
++CONFIG_ZSMALLOC=y
++CONFIG_ZSMALLOC_STAT=y
++CONFIG_ZSWAP=y
++CONFIG_ZPOOL=y
++CONFIG_F2FS_FS=y
++CONFIG_F2FS_FS_XATTR=y
++CONFIG_F2FS_FS_POSIX_ACL=y
++CONFIG_F2FS_FS_SECURITY=y
++CONFIG_F2FS_FS_ENCRYPTION=y
++CONFIG_F2FS_FS_COMPRESSION=y
++CONFIG_F2FS_FS_LZO=y
++CONFIG_F2FS_FS_LZ4=y
++CONFIG_F2FS_FS_ZSTD=y
++CONFIG_EROFS_FS=y
++CONFIG_EROFS_FS_XATTR=y
++CONFIG_EROFS_FS_POSIX_ACL=y
++CONFIG_EROFS_FS_SECURITY=y
++CONFIG_EROFS_FS_ZIP=y
++CONFIG_EROFS_FS_ZIP_LZMA=y
++CONFIG_CRYPTO_LZ4=y
++CONFIG_CRYPTO_LZ4HC=y
++CONFIG_CRYPTO_ZSTD=y
++CONFIG_LZ4_COMPRESS=y
++CONFIG_LZ4_DECOMPRESS=y
++CONFIG_LZ4HC_COMPRESS=y
++CONFIG_ZSTD_COMPRESS=y
++CONFIG_ZSTD_DECOMPRESS=y
++CONFIG_LZ4K_COMPRESS=y
++CONFIG_LZ4K_DECOMPRESS=y
++CONFIG_LZ4KD_COMPRESS=y
++CONFIG_LZ4KD_DECOMPRESS=y
++CONFIG_LZ4K_OPLUS_COMPRESS=y
++CONFIG_LZ4K_OPLUS_DECOMPRESS=y
++CONFIG_NET_SCH_FQ=y
++CONFIG_TCP_CONG_BBR=y
++CONFIG_DEFAULT_BBR=y
+
+ 
+ CONFIG_XFRM_MIGRATE=y
+
+diff --git a/arch/arm64/configs/pissarro_defconfig b/arch/arm64/configs/pissarro_defconfig
+index 000000000000..000000000000 100644
+--- a/arch/arm64/configs/pissarro_defconfig
++++ b/arch/arm64/configs/pissarro_defconfig
+@@ -2350,7 +2350,7 @@ CONFIG_CPU_FREQ_TIMES=y
+ 
+ CONFIG_CPU_FREQ_STAT=y
+ 
+-CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
++CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX=y
+ 
+ CONFIG_CPU_FREQ_GOV_ATTR_SET=y
+ 
+@@ -2358,3 +2358,44 @@ CONFIG_CPU_FREQ_GOV_CONSERVATIVE=y
+ 
+ CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+ 
++CONFIG_CPU_FREQ_GOV_HYDROGENX=y
++CONFIG_HYDROGENX_BOOST=y
++CONFIG_ZRAM=y
++CONFIG_ZRAM_WRITEBACK=y
++CONFIG_ZRAM_MEMORY_TRACKING=y
++CONFIG_ZSMALLOC=y
++CONFIG_ZSMALLOC_STAT=y
++CONFIG_ZSWAP=y
++CONFIG_ZPOOL=y
++CONFIG_F2FS_FS=y
++CONFIG_F2FS_FS_XATTR=y
++CONFIG_F2FS_FS_POSIX_ACL=y
++CONFIG_F2FS_FS_SECURITY=y
++CONFIG_F2FS_FS_ENCRYPTION=y
++CONFIG_F2FS_FS_COMPRESSION=y
++CONFIG_F2FS_FS_LZO=y
++CONFIG_F2FS_FS_LZ4=y
++CONFIG_F2FS_FS_ZSTD=y
++CONFIG_EROFS_FS=y
++CONFIG_EROFS_FS_XATTR=y
++CONFIG_EROFS_FS_POSIX_ACL=y
++CONFIG_EROFS_FS_SECURITY=y
++CONFIG_EROFS_FS_ZIP=y
++CONFIG_EROFS_FS_ZIP_LZMA=y
++CONFIG_CRYPTO_LZ4=y
++CONFIG_CRYPTO_LZ4HC=y
++CONFIG_CRYPTO_ZSTD=y
++CONFIG_LZ4_COMPRESS=y
++CONFIG_LZ4_DECOMPRESS=y
++CONFIG_LZ4HC_COMPRESS=y
++CONFIG_ZSTD_COMPRESS=y
++CONFIG_ZSTD_DECOMPRESS=y
++CONFIG_LZ4K_COMPRESS=y
++CONFIG_LZ4K_DECOMPRESS=y
++CONFIG_LZ4KD_COMPRESS=y
++CONFIG_LZ4KD_DECOMPRESS=y
++CONFIG_LZ4K_OPLUS_COMPRESS=y
++CONFIG_LZ4K_OPLUS_DECOMPRESS=y
++CONFIG_NET_SCH_FQ=y
++CONFIG_TCP_CONG_BBR=y
++CONFIG_DEFAULT_BBR=y
+
+ CONFIG_CPU_FREQ_GOV_BLU_SCHEDUTIL=y
+ 
+ CONFIG_CPU_FREQ_GOV_ELECTROUTIL=y
+
+diff --git a/arch/arm64/configs/pissarro_stability_defconfig b/arch/arm64/configs/pissarro_stability_defconfig
+index 000000000000..000000000000 100644
+--- a/arch/arm64/configs/pissarro_stability_defconfig
++++ b/arch/arm64/configs/pissarro_stability_defconfig
+@@ -1443,11 +1443,55 @@ CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+ CONFIG_CPU_FREQ=y
+ 
+ CONFIG_CPU_FREQ_STAT=y
+ 
+-CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
++CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX=y
+ 
+ CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+ 
+ CONFIG_CPU_FREQ_GOV_USERSPACE=y
+ 
+ CONFIG_CPU_FREQ_GOV_ONDEMAND=y
++
++CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
++
++CONFIG_CPU_FREQ_GOV_HYDROGENX=y
++CONFIG_HYDROGENX_BOOST=y
++CONFIG_ZRAM=y
++CONFIG_ZRAM_WRITEBACK=y
++CONFIG_ZRAM_MEMORY_TRACKING=y
++CONFIG_ZSMALLOC=y
++CONFIG_ZSMALLOC_STAT=y
++CONFIG_ZSWAP=y
++CONFIG_ZPOOL=y
++CONFIG_F2FS_FS=y
++CONFIG_F2FS_FS_XATTR=y
++CONFIG_F2FS_FS_POSIX_ACL=y
++CONFIG_F2FS_FS_SECURITY=y
++CONFIG_F2FS_FS_ENCRYPTION=y
++CONFIG_F2FS_FS_COMPRESSION=y
++CONFIG_F2FS_FS_LZO=y
++CONFIG_F2FS_FS_LZ4=y
++CONFIG_F2FS_FS_ZSTD=y
++CONFIG_EROFS_FS=y
++CONFIG_EROFS_FS_XATTR=y
++CONFIG_EROFS_FS_POSIX_ACL=y
++CONFIG_EROFS_FS_SECURITY=y
++CONFIG_EROFS_FS_ZIP=y
++CONFIG_EROFS_FS_ZIP_LZMA=y
++CONFIG_CRYPTO_LZ4=y
++CONFIG_CRYPTO_LZ4HC=y
++CONFIG_CRYPTO_ZSTD=y
++CONFIG_LZ4_COMPRESS=y
++CONFIG_LZ4_DECOMPRESS=y
++CONFIG_LZ4HC_COMPRESS=y
++CONFIG_ZSTD_COMPRESS=y
++CONFIG_ZSTD_DECOMPRESS=y
++CONFIG_LZ4K_COMPRESS=y
++CONFIG_LZ4K_DECOMPRESS=y
++CONFIG_LZ4KD_COMPRESS=y
++CONFIG_LZ4KD_DECOMPRESS=y
++CONFIG_LZ4K_OPLUS_COMPRESS=y
++CONFIG_LZ4K_OPLUS_DECOMPRESS=y
++CONFIG_NET_SCH_FQ=y
++CONFIG_TCP_CONG_BBR=y
++CONFIG_DEFAULT_BBR=y
+
+ 
+ CONFIG_XFRM_MIGRATE=y
+
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+index 000000000000..000000000000 100644
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -42,7 +42,7 @@ static DEFINE_IDR(zram_index_idr);
+ static DEFINE_MUTEX(zram_index_mutex);
+ static int zram_major;
+ static struct zram *zram_devices;
+-static const char *default_compressor = "lzo";
++static const char *default_compressor = "lz4";
+ 
+ /* Module params (documentation at end) */
+ static unsigned int num_devices = 1;
+
+diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
+index 000000000000..000000000000 100644
+--- a/drivers/cpufreq/Kconfig
++++ b/drivers/cpufreq/Kconfig
+@@ -77,6 +77,19 @@ config CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+ 
+ 	  Use the 'schedutil' CPUFreq governor by default. If unsure,
+ 	  have a look at the help section of that governor. The fallback
+ 	  governor will be 'performance'.
++
++config CPU_FREQ_DEFAULT_GOV_HYDROGENX
++	bool "hydrogenx"
++	depends on SMP
++	select CPU_FREQ_GOV_HYDROGENX
++	select CPU_FREQ_GOV_PERFORMANCE
++	help
++	  Use the 'hydrogenx' CPUFreq governor by default.
++
++	  This governor is tuned for Android phones that need fast response
++	  under UI/game bursts, but also need slower ramp-down and optional
++	  powersave bias to reduce frequency bouncing and heat.
++	  The fallback governor will be 'performance'.
+ 
+ endchoice
+@@ -148,4 +161,28 @@ config CPU_FREQ_GOV_SCHEDUTIL
+ 
+ 	  If in doubt, say N.
++
++config CPU_FREQ_GOV_HYDROGENX
++	bool "'hydrogenx' cpufreq policy governor"
++	depends on CPU_FREQ && SMP
++	select CPU_FREQ_GOV_COMMON
++	default y
++	help
++	  'hydrogenx' is a third-party Android-oriented dynamic cpufreq
++	  governor.  It uses the common dbs governor framework, and v10 can
++	  read the global HydrogenX boost scene controller for input, frame,
++	  GPU, DDR and IO boost floors.
++
++	  The policy prefers:
++	  - fast ramp-up when CPU load crosses up_threshold;
++	  - schedutil-like fast reaction via boost floors;
++	  - a configurable hispeed floor for frame-sensitive loads;
++	  - delayed ramp-down through min_sample_time to reduce FPS jitter;
++	  - optional powersave_bias for lower heat and power at light load;
++	  - userspace boostpulse support for game/touch/performance daemons.
++
++	  Tunables are exported below the governor sysfs directory and global
++	  boost scene knobs are under /sys/kernel/hydrogenx/.
++
++	  If in doubt, say N.
+ 
+ comment "CPU frequency scaling drivers"
+
+diff --git a/drivers/cpufreq/Makefile b/drivers/cpufreq/Makefile
+index 000000000000..000000000000 100644
+--- a/drivers/cpufreq/Makefile
++++ b/drivers/cpufreq/Makefile
+@@ -13,7 +13,12 @@ obj-$(CONFIG_CPU_FREQ_GOV_USERSPACE)      += cpufreq_userspace.o
+ obj-$(CONFIG_CPU_FREQ_GOV_ONDEMAND)       += cpufreq_ondemand.o
+ obj-$(CONFIG_CPU_FREQ_GOV_CONSERVATIVE)   += cpufreq_conservative.o
+ obj-$(CONFIG_CPU_FREQ_GOV_INTERACTIVE)    += cpufreq_interactive.o
++# HydrogenX depends on the dbs governor common code.  Do not force-build it
++# with CONFIG_CPU_FREQ alone, otherwise custom configs that do not select
++# CPU_FREQ_GOV_COMMON can fail at link time.  Clean pissarro defconfigs below
++# select CPU_FREQ_GOV_HYDROGENX, which in turn selects the common governor core.
++obj-$(CONFIG_CPU_FREQ_GOV_HYDROGENX)      += cpufreq_hydrogenx.o
+ obj-$(CONFIG_CPU_FREQ_GOV_COMMON)         += cpufreq_governor.o
+ obj-$(CONFIG_CPU_FREQ_GOV_ATTR_SET)       += cpufreq_governor_attr_set.o
+ 
+ obj-$(CONFIG_CPUFREQ_DT)                  += cpufreq-dt.o
+
+diff --git a/drivers/cpufreq/cpufreq_hydrogenx.c b/drivers/cpufreq/cpufreq_hydrogenx.c
+new file mode 100644
+index 000000000000..000000000000
+--- /dev/null
++++ b/drivers/cpufreq/cpufreq_hydrogenx.c
+@@ -0,0 +1,1045 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * drivers/cpufreq/cpufreq_hydrogenx.c
++ *
++ * HydrogenX cpufreq governor for Android 4.14 kernels.
++ *
++ * v10 fuses the v2 game governor with a global boost/input scene engine
++ * and schedtune/MTK weak bridges. It keeps direct cpufreq decisions local
++ * while allowing input, frame, GPU, DDR and IO scenes to raise frequency
++ * floors without userspace touching each policy directory.
++ *
++ * v10 is intentionally more aggressive than the safe baseline:
++ * - shorter effective sampling under boosts;
++ * - game/profile floors;
++ * - separate input, frame and generic boost pulses;
++ * - smoothed load to reduce FPS jitter;
++ * - delayed downscale and optional powersave bias for lower heat.
++ *
++ * It still uses the stock dbs governor framework, and private MTK hooks are
++ * wired through weak bridge symbols so missing vendor exports do not break
++ * the build.
++ */
++
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
++
++#include <linux/cpufreq.h>
++#include <linux/jiffies.h>
++#include <linux/hydrogenx_boost.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++
++#include "cpufreq_governor.h"
++
++#define HYDROGENX_PROFILE_BALANCED        0
++#define HYDROGENX_PROFILE_GAME            1
++#define HYDROGENX_PROFILE_BATTERY         2
++
++#define HYDROGENX_DEF_UP_THRESHOLD        82
++#define HYDROGENX_DEF_DOWN_THRESHOLD      32
++#define HYDROGENX_DEF_HISPEED_LOAD        58
++#define HYDROGENX_DEF_MAX_PERF_LOAD       88
++#define HYDROGENX_DEF_LOW_POWER_LOAD      18
++#define HYDROGENX_DEF_MIN_SAMPLE_TIME_MS  72
++#define HYDROGENX_DEF_POWERSAVE_BIAS      80
++#define HYDROGENX_DEF_BOOST_DURATION_MS   180
++#define HYDROGENX_DEF_INPUT_BOOST_MS      80
++#define HYDROGENX_DEF_FRAME_BOOST_MS      260
++#define HYDROGENX_DEF_LOAD_SMOOTHING      35
++
++#define HYDROGENX_MAX_POWERSAVE_BIAS      1000
++#define HYDROGENX_MAX_MIN_SAMPLE_TIME_MS  2000
++#define HYDROGENX_MAX_BOOST_DURATION_MS   10000
++#define HYDROGENX_MAX_LOAD_SMOOTHING      95
++
++struct hyd_dbs_tuners {
++	unsigned int profile;
++	unsigned int game_mode;
++	unsigned int down_threshold;
++	unsigned int hispeed_load;
++	unsigned int hispeed_freq;
++	unsigned int max_perf_load;
++	unsigned int low_power_load;
++	unsigned int min_sample_time;
++	unsigned int powersave_bias;
++	unsigned int load_smoothing;
++	unsigned int fast_ramp_down;
++	unsigned int boost_duration_ms;
++	unsigned int boost_freq;
++	unsigned int input_boost_ms;
++	unsigned int input_boost_freq;
++	unsigned int frame_boost_ms;
++	unsigned int frame_min_freq;
++	unsigned int game_min_freq;
++};
++
++enum hyd_pulse_type {
++	HYD_PULSE_GENERIC,
++	HYD_PULSE_INPUT,
++	HYD_PULSE_FRAME,
++};
++
++struct hyd_policy_dbs_info {
++	struct policy_dbs_info policy_dbs;
++	unsigned long last_freq_update_jiffies;
++	unsigned long boost_until;
++	unsigned long input_boost_until;
++	unsigned long frame_boost_until;
++	unsigned int smoothed_load;
++	unsigned int last_target_freq;
++};
++
++static inline struct hyd_policy_dbs_info *to_hyd_policy_dbs_info(struct policy_dbs_info *policy_dbs)
++{
++	return container_of(policy_dbs, struct hyd_policy_dbs_info, policy_dbs);
++}
++
++static int hyd_parse_uint(const char *buf, unsigned int *input)
++{
++	int ret;
++
++	ret = sscanf(buf, "%u", input);
++	return ret == 1 ? 0 : -EINVAL;
++}
++
++static unsigned int hyd_clamp_freq(struct cpufreq_policy *policy, unsigned int freq)
++{
++	return clamp_t(unsigned int, freq, policy->min, policy->max);
++}
++
++static bool hyd_time_active(unsigned long until)
++{
++	return until && time_before(jiffies, until);
++}
++
++static unsigned int hyd_pick_hispeed(struct cpufreq_policy *policy,
++				     struct hyd_dbs_tuners *tuners)
++{
++	unsigned int hispeed;
++
++	if (tuners->hispeed_freq)
++		hispeed = tuners->hispeed_freq;
++	else
++		hispeed = policy->min + (policy->max - policy->min) * 72 / 100;
++
++	return hyd_clamp_freq(policy, hispeed);
++}
++
++static unsigned int hyd_pick_floor(struct cpufreq_policy *policy,
++				   struct hyd_dbs_tuners *tuners,
++				   struct hyd_policy_dbs_info *hyd_info)
++{
++	unsigned int floor = policy->min;
++	unsigned int hispeed = hyd_pick_hispeed(policy, tuners);
++	struct hydrogenx_boost_state hx_state;
++
++	hydrogenx_boost_get_state(&hx_state);
++
++	if (hx_state.boost)
++		floor = max_t(unsigned int, floor, policy->max);
++
++	if (hx_state.input)
++		floor = max_t(unsigned int, floor, hispeed);
++
++	if (hx_state.frame || hx_state.gpu || hx_state.ddr || hx_state.io)
++		floor = max_t(unsigned int, floor, hispeed);
++
++	if (hx_state.floor_freq)
++		floor = max_t(unsigned int, floor, hx_state.floor_freq);
++
++	if (hx_state.floor_pct)
++		floor = max_t(unsigned int, floor,
++			policy->min + (policy->max - policy->min) *
++			min_t(unsigned int, hx_state.floor_pct, 100) / 100);
++
++	if (hx_state.game_mode ||
++	    hx_state.profile == HYDROGENX_BOOST_PROFILE_GAME)
++		floor = max_t(unsigned int, floor,
++			tuners->game_min_freq ? tuners->game_min_freq : hispeed);
++
++	if (hyd_time_active(hyd_info->boost_until))
++		floor = max_t(unsigned int, floor,
++				  tuners->boost_freq ? tuners->boost_freq : policy->max);
++
++	if (hyd_time_active(hyd_info->input_boost_until))
++		floor = max_t(unsigned int, floor,
++				  tuners->input_boost_freq ? tuners->input_boost_freq : hispeed);
++
++	if (hyd_time_active(hyd_info->frame_boost_until))
++		floor = max_t(unsigned int, floor,
++				  tuners->frame_min_freq ? tuners->frame_min_freq : hispeed);
++
++	if (tuners->game_mode || tuners->profile == HYDROGENX_PROFILE_GAME)
++		floor = max_t(unsigned int, floor,
++				  tuners->game_min_freq ? tuners->game_min_freq : hispeed);
++
++	return hyd_clamp_freq(policy, floor);
++}
++
++static unsigned int hyd_effective_up_threshold(struct hyd_dbs_tuners *tuners,
++					       unsigned int up_threshold)
++{
++	if (tuners->game_mode || tuners->profile == HYDROGENX_PROFILE_GAME)
++		return min_t(unsigned int, up_threshold, 72);
++
++	if (tuners->profile == HYDROGENX_PROFILE_BATTERY)
++		return max_t(unsigned int, up_threshold, 90);
++
++	return up_threshold;
++}
++
++static unsigned int hyd_effective_hispeed_load(struct hyd_dbs_tuners *tuners)
++{
++	if (tuners->game_mode || tuners->profile == HYDROGENX_PROFILE_GAME)
++		return min_t(unsigned int, tuners->hispeed_load, 45);
++
++	if (tuners->profile == HYDROGENX_PROFILE_BATTERY)
++		return max_t(unsigned int, tuners->hispeed_load, 72);
++
++	return tuners->hispeed_load;
++}
++
++static unsigned int hyd_effective_powersave_bias(struct hyd_dbs_tuners *tuners,
++						 bool protected_boost)
++{
++	if (protected_boost || tuners->game_mode ||
++	    tuners->profile == HYDROGENX_PROFILE_GAME)
++		return 0;
++
++	if (tuners->profile == HYDROGENX_PROFILE_BATTERY)
++		return min_t(unsigned int, tuners->powersave_bias + 180,
++			     HYDROGENX_MAX_POWERSAVE_BIAS);
++
++	return tuners->powersave_bias;
++}
++
++static unsigned int hyd_effective_down_hold(struct hyd_dbs_tuners *tuners,
++					    bool frame_boost)
++{
++	unsigned int hold = tuners->min_sample_time;
++
++	if (tuners->game_mode || tuners->profile == HYDROGENX_PROFILE_GAME)
++		hold = max_t(unsigned int, hold, 90);
++
++	if (frame_boost)
++		hold = max_t(unsigned int, hold, tuners->frame_boost_ms);
++
++	if (tuners->profile == HYDROGENX_PROFILE_BATTERY)
++		hold = min_t(unsigned int, hold, 48);
++
++	return hold;
++}
++
++static unsigned int hyd_smooth_load(struct hyd_policy_dbs_info *hyd_info,
++				    struct hyd_dbs_tuners *tuners,
++				    unsigned int load)
++{
++	unsigned int smooth = tuners->load_smoothing;
++
++	if (!smooth || !hyd_info->smoothed_load) {
++		hyd_info->smoothed_load = load;
++		return load;
++	}
++
++	hyd_info->smoothed_load = (hyd_info->smoothed_load * smooth +
++				 load * (100 - smooth)) / 100;
++
++	if (load > hyd_info->smoothed_load)
++		hyd_info->smoothed_load = max_t(unsigned int,
++					       hyd_info->smoothed_load, load - 5);
++
++	return min_t(unsigned int, hyd_info->smoothed_load, 100);
++}
++
++static unsigned int hyd_target_freq(struct cpufreq_policy *policy,
++				    unsigned int load)
++{
++	unsigned int min_f = policy->cpuinfo.min_freq;
++	unsigned int max_f = policy->cpuinfo.max_freq;
++
++	min_f = max(min_f, policy->min);
++	max_f = min(max_f, policy->max);
++
++	if (unlikely(max_f <= min_f))
++		return policy->min;
++
++	return min_f + load * (max_f - min_f) / 100;
++}
++
++static unsigned int hyd_apply_powersave_bias(struct cpufreq_policy *policy,
++					    unsigned int target,
++					    unsigned int bias)
++{
++	if (!bias || target <= policy->min)
++		return target;
++
++	if (bias > HYDROGENX_MAX_POWERSAVE_BIAS)
++		bias = HYDROGENX_MAX_POWERSAVE_BIAS;
++
++	target = policy->min +
++		(target - policy->min) * (HYDROGENX_MAX_POWERSAVE_BIAS - bias) /
++		HYDROGENX_MAX_POWERSAVE_BIAS;
++
++	return hyd_clamp_freq(policy, target);
++}
++
++static void hyd_set_target(struct cpufreq_policy *policy,
++			   unsigned int target,
++			   unsigned int relation,
++			   unsigned int down_hold_ms)
++{
++	struct policy_dbs_info *policy_dbs = policy->governor_data;
++	struct dbs_data *dbs_data = policy_dbs->dbs_data;
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	struct hyd_policy_dbs_info *hyd_info;
++	unsigned long hold_time;
++
++	target = hyd_clamp_freq(policy, target);
++	hyd_info = to_hyd_policy_dbs_info(policy_dbs);
++
++	if (target < policy->cur && !tuners->fast_ramp_down && down_hold_ms) {
++		hold_time = msecs_to_jiffies(down_hold_ms);
++		if (time_before(jiffies,
++				hyd_info->last_freq_update_jiffies + hold_time))
++			return;
++	}
++
++	if (policy->cur == target)
++		return;
++
++	__cpufreq_driver_target(policy, target, relation);
++	hyd_info->last_freq_update_jiffies = jiffies;
++	hyd_info->last_target_freq = target;
++}
++
++static unsigned int hyd_next_delay(struct dbs_data *dbs_data, bool urgent)
++{
++	unsigned int rate = dbs_data->sampling_rate;
++
++	if (!rate)
++		return 10000;
++
++	if (urgent && rate > 4000)
++		return max_t(unsigned int, rate / 2, 4000);
++
++	return rate;
++}
++
++static unsigned int hyd_dbs_update(struct cpufreq_policy *policy)
++{
++	struct policy_dbs_info *policy_dbs = policy->governor_data;
++	struct hyd_policy_dbs_info *hyd_info = to_hyd_policy_dbs_info(policy_dbs);
++	struct dbs_data *dbs_data = policy_dbs->dbs_data;
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int load, raw_load, target, hispeed, floor;
++	unsigned int up_threshold, hispeed_load, bias, down_hold;
++	bool generic_boost, input_boost, frame_boost, protected_boost;
++	struct hydrogenx_boost_state hx_state;
++
++	hydrogenx_boost_get_state(&hx_state);
++
++	raw_load = dbs_update(policy);
++	load = hyd_smooth_load(hyd_info, tuners, raw_load);
++
++	generic_boost = hyd_time_active(hyd_info->boost_until) || hx_state.boost;
++	input_boost = hyd_time_active(hyd_info->input_boost_until) || hx_state.input;
++	frame_boost = hyd_time_active(hyd_info->frame_boost_until) ||
++		hx_state.frame || hx_state.gpu || hx_state.ddr || hx_state.io;
++	protected_boost = generic_boost || input_boost || frame_boost ||
++		hx_state.game_mode ||
++		hx_state.profile == HYDROGENX_BOOST_PROFILE_GAME;
++
++	floor = hyd_pick_floor(policy, tuners, hyd_info);
++	hispeed = hyd_pick_hispeed(policy, tuners);
++	up_threshold = hyd_effective_up_threshold(tuners, dbs_data->up_threshold);
++	hispeed_load = hyd_effective_hispeed_load(tuners);
++	bias = hyd_effective_powersave_bias(tuners, protected_boost);
++	down_hold = hyd_effective_down_hold(tuners, frame_boost);
++
++	if (hx_state.game_mode ||
++	    hx_state.profile == HYDROGENX_BOOST_PROFILE_GAME) {
++		up_threshold = min_t(unsigned int, up_threshold, 68);
++		hispeed_load = min_t(unsigned int, hispeed_load, 40);
++		bias = 0;
++		down_hold = max_t(unsigned int, down_hold, 120);
++	} else if (hx_state.profile == HYDROGENX_BOOST_PROFILE_BATTERY) {
++		up_threshold = max_t(unsigned int, up_threshold, 90);
++		hispeed_load = max_t(unsigned int, hispeed_load, 72);
++	}
++
++	if (hx_state.io)
++		dbs_data->io_is_busy = 1;
++
++	if (generic_boost) {
++		hyd_set_target(policy, floor, CPUFREQ_RELATION_L, down_hold);
++		return hyd_next_delay(dbs_data, true);
++	}
++
++	if (raw_load >= tuners->max_perf_load || load >= tuners->max_perf_load) {
++		policy_dbs->rate_mult = 1;
++		hyd_set_target(policy, policy->max, CPUFREQ_RELATION_H, down_hold);
++		return hyd_next_delay(dbs_data, true);
++	}
++
++	if (raw_load >= up_threshold || load >= up_threshold) {
++		policy_dbs->rate_mult = 1;
++		target = max_t(unsigned int, hyd_target_freq(policy, max(raw_load, load)), hispeed);
++		target = max(target, floor);
++		hyd_set_target(policy, target, CPUFREQ_RELATION_L, down_hold);
++		return hyd_next_delay(dbs_data, input_boost || frame_boost);
++	}
++
++	target = hyd_target_freq(policy, load);
++
++	if (raw_load >= hispeed_load || load >= hispeed_load)
++		target = max(target, hispeed);
++
++	if (load <= tuners->down_threshold || raw_load <= tuners->low_power_load)
++		target = hyd_apply_powersave_bias(policy, target, bias);
++
++	target = max(target, floor);
++
++	if (target > policy->cur)
++		hyd_set_target(policy, target, CPUFREQ_RELATION_L, down_hold);
++	else if (target < policy->cur)
++		hyd_set_target(policy, target, CPUFREQ_RELATION_H, down_hold);
++	else
++		hyd_set_target(policy, target, CPUFREQ_RELATION_C, down_hold);
++
++	return hyd_next_delay(dbs_data, input_boost || frame_boost);
++}
++
++/************************** sysfs interface ************************/
++
++static ssize_t store_io_is_busy(struct gov_attr_set *attr_set,
++				 const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	dbs_data->io_is_busy = !!input;
++	gov_update_cpu_data(dbs_data);
++
++	return count;
++}
++
++static ssize_t store_ignore_nice_load(struct gov_attr_set *attr_set,
++				      const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	dbs_data->ignore_nice_load = !!input;
++	gov_update_cpu_data(dbs_data);
++
++	return count;
++}
++
++static ssize_t store_up_threshold(struct gov_attr_set *attr_set,
++				  const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input < 2 || input > 100 || input <= tuners->down_threshold)
++		return -EINVAL;
++
++	dbs_data->up_threshold = input;
++	return count;
++}
++
++static ssize_t store_profile(struct gov_attr_set *attr_set,
++			     const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_PROFILE_BATTERY)
++		return -EINVAL;
++
++	tuners->profile = input;
++	return count;
++}
++
++static ssize_t store_game_mode(struct gov_attr_set *attr_set,
++			       const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	tuners->game_mode = !!input;
++	return count;
++}
++
++static ssize_t store_down_threshold(struct gov_attr_set *attr_set,
++				    const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input < 1 || input >= dbs_data->up_threshold)
++		return -EINVAL;
++
++	tuners->down_threshold = input;
++	return count;
++}
++
++static ssize_t store_hispeed_load(struct gov_attr_set *attr_set,
++				   const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input < tuners->down_threshold || input > 100)
++		return -EINVAL;
++
++	tuners->hispeed_load = input;
++	return count;
++}
++
++static ssize_t store_hispeed_freq(struct gov_attr_set *attr_set,
++				   const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	/* 0 means auto hispeed. */
++	tuners->hispeed_freq = input;
++	return count;
++}
++
++static ssize_t store_max_perf_load(struct gov_attr_set *attr_set,
++				   const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input < 50 || input > 100)
++		return -EINVAL;
++
++	tuners->max_perf_load = input;
++	return count;
++}
++
++static ssize_t store_low_power_load(struct gov_attr_set *attr_set,
++				    const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > 100)
++		return -EINVAL;
++
++	tuners->low_power_load = input;
++	return count;
++}
++
++static ssize_t store_min_sample_time(struct gov_attr_set *attr_set,
++				      const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_MAX_MIN_SAMPLE_TIME_MS)
++		return -EINVAL;
++
++	tuners->min_sample_time = input;
++	return count;
++}
++
++static ssize_t store_powersave_bias(struct gov_attr_set *attr_set,
++				     const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_MAX_POWERSAVE_BIAS)
++		return -EINVAL;
++
++	tuners->powersave_bias = input;
++	return count;
++}
++
++static ssize_t store_load_smoothing(struct gov_attr_set *attr_set,
++				     const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_MAX_LOAD_SMOOTHING)
++		return -EINVAL;
++
++	tuners->load_smoothing = input;
++	return count;
++}
++
++static ssize_t store_fast_ramp_down(struct gov_attr_set *attr_set,
++				     const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	tuners->fast_ramp_down = !!input;
++	return count;
++}
++
++static ssize_t store_boost_duration_ms(struct gov_attr_set *attr_set,
++				       const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_MAX_BOOST_DURATION_MS)
++		return -EINVAL;
++
++	tuners->boost_duration_ms = input;
++	return count;
++}
++
++static ssize_t store_boost_freq(struct gov_attr_set *attr_set,
++				const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	/* 0 means max frequency during generic boost. */
++	tuners->boost_freq = input;
++	return count;
++}
++
++static ssize_t store_input_boost_ms(struct gov_attr_set *attr_set,
++				    const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_MAX_BOOST_DURATION_MS)
++		return -EINVAL;
++
++	tuners->input_boost_ms = input;
++	return count;
++}
++
++static ssize_t store_input_boost_freq(struct gov_attr_set *attr_set,
++				      const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	/* 0 means auto hispeed for input boost. */
++	tuners->input_boost_freq = input;
++	return count;
++}
++
++static ssize_t store_frame_boost_ms(struct gov_attr_set *attr_set,
++				    const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_MAX_BOOST_DURATION_MS)
++		return -EINVAL;
++
++	tuners->frame_boost_ms = input;
++	return count;
++}
++
++static ssize_t store_frame_min_freq(struct gov_attr_set *attr_set,
++				    const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	/* 0 means auto hispeed frame floor. */
++	tuners->frame_min_freq = input;
++	return count;
++}
++
++static ssize_t store_game_min_freq(struct gov_attr_set *attr_set,
++				   const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	/* 0 means auto hispeed game floor. */
++	tuners->game_min_freq = input;
++	return count;
++}
++
++static void hyd_pulse_all(struct gov_attr_set *attr_set,
++			  unsigned int duration_ms,
++			  enum hyd_pulse_type type)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	struct policy_dbs_info *policy_dbs;
++	unsigned long until;
++
++	if (!duration_ms)
++		return;
++
++	until = jiffies + msecs_to_jiffies(duration_ms);
++
++	list_for_each_entry(policy_dbs, &attr_set->policy_list, list) {
++		struct hyd_policy_dbs_info *hyd_info;
++		struct cpufreq_policy *policy = policy_dbs->policy;
++		unsigned int floor;
++
++		if (!policy)
++			continue;
++
++		hyd_info = to_hyd_policy_dbs_info(policy_dbs);
++
++		switch (type) {
++		case HYD_PULSE_GENERIC:
++			hyd_info->boost_until = until;
++			break;
++		case HYD_PULSE_INPUT:
++			hyd_info->input_boost_until = until;
++			break;
++		case HYD_PULSE_FRAME:
++			hyd_info->frame_boost_until = until;
++			break;
++		}
++
++		floor = hyd_pick_floor(policy, tuners, hyd_info);
++
++		mutex_lock(&policy_dbs->update_mutex);
++		hyd_set_target(policy, max(floor, policy->cur), CPUFREQ_RELATION_L, 0);
++		gov_update_sample_delay(policy_dbs, 0);
++		mutex_unlock(&policy_dbs->update_mutex);
++	}
++}
++
++static ssize_t store_boostpulse(struct gov_attr_set *attr_set,
++				 const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input)
++		hyd_pulse_all(attr_set, tuners->boost_duration_ms,
++			      HYD_PULSE_GENERIC);
++
++	return count;
++}
++
++static ssize_t store_input_boostpulse(struct gov_attr_set *attr_set,
++				       const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input)
++		hyd_pulse_all(attr_set, tuners->input_boost_ms,
++			      HYD_PULSE_INPUT);
++
++	return count;
++}
++
++static ssize_t store_frame_boost(struct gov_attr_set *attr_set,
++				 const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input)
++		hyd_pulse_all(attr_set, tuners->frame_boost_ms,
++			      HYD_PULSE_FRAME);
++
++	return count;
++}
++
++gov_show_one_common(sampling_rate);
++gov_show_one_common(up_threshold);
++gov_show_one_common(ignore_nice_load);
++gov_show_one_common(io_is_busy);
++gov_show_one(hyd, profile);
++gov_show_one(hyd, game_mode);
++gov_show_one(hyd, down_threshold);
++gov_show_one(hyd, hispeed_load);
++gov_show_one(hyd, hispeed_freq);
++gov_show_one(hyd, max_perf_load);
++gov_show_one(hyd, low_power_load);
++gov_show_one(hyd, min_sample_time);
++gov_show_one(hyd, powersave_bias);
++gov_show_one(hyd, load_smoothing);
++gov_show_one(hyd, fast_ramp_down);
++gov_show_one(hyd, boost_duration_ms);
++gov_show_one(hyd, boost_freq);
++gov_show_one(hyd, input_boost_ms);
++gov_show_one(hyd, input_boost_freq);
++gov_show_one(hyd, frame_boost_ms);
++gov_show_one(hyd, frame_min_freq);
++gov_show_one(hyd, game_min_freq);
++
++gov_attr_rw(sampling_rate);
++gov_attr_rw(up_threshold);
++gov_attr_rw(ignore_nice_load);
++gov_attr_rw(io_is_busy);
++gov_attr_rw(profile);
++gov_attr_rw(game_mode);
++gov_attr_rw(down_threshold);
++gov_attr_rw(hispeed_load);
++gov_attr_rw(hispeed_freq);
++gov_attr_rw(max_perf_load);
++gov_attr_rw(low_power_load);
++gov_attr_rw(min_sample_time);
++gov_attr_rw(powersave_bias);
++gov_attr_rw(load_smoothing);
++gov_attr_rw(fast_ramp_down);
++gov_attr_rw(boost_duration_ms);
++gov_attr_rw(boost_freq);
++gov_attr_rw(input_boost_ms);
++gov_attr_rw(input_boost_freq);
++gov_attr_rw(frame_boost_ms);
++gov_attr_rw(frame_min_freq);
++gov_attr_rw(game_min_freq);
++static struct governor_attr boostpulse =
++	__ATTR(boostpulse, 0200, NULL, store_boostpulse);
++static struct governor_attr input_boostpulse =
++	__ATTR(input_boostpulse, 0200, NULL, store_input_boostpulse);
++static struct governor_attr frame_boost =
++	__ATTR(frame_boost, 0200, NULL, store_frame_boost);
++
++static struct attribute *hyd_attributes[] = {
++	&sampling_rate.attr,
++	&up_threshold.attr,
++	&down_threshold.attr,
++	&hispeed_load.attr,
++	&hispeed_freq.attr,
++	&max_perf_load.attr,
++	&low_power_load.attr,
++	&min_sample_time.attr,
++	&powersave_bias.attr,
++	&load_smoothing.attr,
++	&fast_ramp_down.attr,
++	&boost_duration_ms.attr,
++	&boost_freq.attr,
++	&boostpulse.attr,
++	&input_boost_ms.attr,
++	&input_boost_freq.attr,
++	&input_boostpulse.attr,
++	&frame_boost_ms.attr,
++	&frame_min_freq.attr,
++	&frame_boost.attr,
++	&game_min_freq.attr,
++	&profile.attr,
++	&game_mode.attr,
++	&ignore_nice_load.attr,
++	&io_is_busy.attr,
++	NULL
++};
++
++/************************** sysfs end ************************/
++
++static struct policy_dbs_info *hyd_alloc(void)
++{
++	struct hyd_policy_dbs_info *hyd_info;
++
++	hyd_info = kzalloc(sizeof(*hyd_info), GFP_KERNEL);
++	return hyd_info ? &hyd_info->policy_dbs : NULL;
++}
++
++static void hyd_free(struct policy_dbs_info *policy_dbs)
++{
++	kfree(to_hyd_policy_dbs_info(policy_dbs));
++}
++
++static int hyd_init(struct dbs_data *dbs_data)
++{
++	struct hyd_dbs_tuners *tuners;
++
++	tuners = kzalloc(sizeof(*tuners), GFP_KERNEL);
++	if (!tuners)
++		return -ENOMEM;
++
++	dbs_data->up_threshold = HYDROGENX_DEF_UP_THRESHOLD;
++	dbs_data->ignore_nice_load = 0;
++	dbs_data->io_is_busy = 1;
++
++	tuners->profile = HYDROGENX_PROFILE_BALANCED;
++	tuners->game_mode = 0;
++	tuners->down_threshold = HYDROGENX_DEF_DOWN_THRESHOLD;
++	tuners->hispeed_load = HYDROGENX_DEF_HISPEED_LOAD;
++	tuners->hispeed_freq = 0;
++	tuners->max_perf_load = HYDROGENX_DEF_MAX_PERF_LOAD;
++	tuners->low_power_load = HYDROGENX_DEF_LOW_POWER_LOAD;
++	tuners->min_sample_time = HYDROGENX_DEF_MIN_SAMPLE_TIME_MS;
++	tuners->powersave_bias = HYDROGENX_DEF_POWERSAVE_BIAS;
++	tuners->load_smoothing = HYDROGENX_DEF_LOAD_SMOOTHING;
++	tuners->fast_ramp_down = 0;
++	tuners->boost_duration_ms = HYDROGENX_DEF_BOOST_DURATION_MS;
++	tuners->boost_freq = 0;
++	tuners->input_boost_ms = HYDROGENX_DEF_INPUT_BOOST_MS;
++	tuners->input_boost_freq = 0;
++	tuners->frame_boost_ms = HYDROGENX_DEF_FRAME_BOOST_MS;
++	tuners->frame_min_freq = 0;
++	tuners->game_min_freq = 0;
++	dbs_data->tuners = tuners;
++
++	return 0;
++}
++
++static void hyd_exit(struct dbs_data *dbs_data)
++{
++	kfree(dbs_data->tuners);
++}
++
++static void hyd_start(struct cpufreq_policy *policy)
++{
++	struct policy_dbs_info *policy_dbs = policy->governor_data;
++	struct hyd_policy_dbs_info *hyd_info = to_hyd_policy_dbs_info(policy_dbs);
++
++	hyd_info->last_freq_update_jiffies = jiffies;
++	hyd_info->boost_until = 0;
++	hyd_info->input_boost_until = 0;
++	hyd_info->frame_boost_until = 0;
++	hyd_info->smoothed_load = 0;
++	hyd_info->last_target_freq = policy->cur;
++}
++
++static struct dbs_governor hyd_dbs_gov = {
++	.gov = CPUFREQ_DBS_GOVERNOR_INITIALIZER("hydrogenx"),
++	.kobj_type = {
++		.default_attrs = hyd_attributes,
++	},
++	.gov_dbs_update = hyd_dbs_update,
++	.alloc = hyd_alloc,
++	.free = hyd_free,
++	.init = hyd_init,
++	.exit = hyd_exit,
++	.start = hyd_start,
++};
++
++#define CPU_FREQ_GOV_HYDROGENX (&hyd_dbs_gov.gov)
++
++static int __init cpufreq_gov_hydrogenx_init(void)
++{
++	int ret;
++
++	ret = cpufreq_register_governor(CPU_FREQ_GOV_HYDROGENX);
++	if (ret)
++		pr_err("failed to register hydrogenx governor: %d\n", ret);
++	else
++		pr_info("registered hydrogenx governor %s; check scaling_available_governors\n",
++			HYDROGENX_BOOST_VERSION);
++
++	return ret;
++}
++
++static void __exit cpufreq_gov_hydrogenx_exit(void)
++{
++	cpufreq_unregister_governor(CPU_FREQ_GOV_HYDROGENX);
++}
++
++MODULE_AUTHOR("ChatGPT");
++MODULE_DESCRIPTION("CPUfreq policy governor 'hydrogenx' v10");
++MODULE_LICENSE("GPL");
++
++#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX
++struct cpufreq_governor *cpufreq_default_governor(void)
++{
++	return CPU_FREQ_GOV_HYDROGENX;
++}
++core_initcall(cpufreq_gov_hydrogenx_init);
++#else
++module_init(cpufreq_gov_hydrogenx_init);
++#endif
++
++module_exit(cpufreq_gov_hydrogenx_exit);
+
+diff --git a/kernel/sched/tune_plus.c b/kernel/sched/tune_plus.c
+index 000000000000..000000000000 100644
+--- a/kernel/sched/tune_plus.c
++++ b/kernel/sched/tune_plus.c
+@@ -160,6 +160,40 @@ int group_boost_read(int group_idx)
+ 	return boost;
+ }
+ EXPORT_SYMBOL(group_boost_read);
++
++void schedtune_hydrogenx_set_boost(int boost_value)
++{
++	if (boost_value > 100)
++		boost_value = 100;
++
++	/* root, foreground and top-app are the groups that matter most on Android. */
++	boost_write_for_perf_idx(0, boost_value);
++	boost_write_for_perf_idx(1, boost_value);
++	boost_write_for_perf_idx(3, boost_value);
++	prefer_idle_for_perf_idx(3, !!boost_value);
++}
++EXPORT_SYMBOL_GPL(schedtune_hydrogenx_set_boost);
++
++void schedtune_hydrogenx_set_uclamp_min(unsigned int min_pct)
++{
++	if (min_pct > 100)
++		min_pct = 100;
++
++#if defined(CONFIG_UCLAMP_TASK_GROUP) && defined(CONFIG_SCHED_TUNE)
++	uclamp_min_pct_for_perf_idx(0, min_pct);
++	uclamp_min_pct_for_perf_idx(1, min_pct);
++	uclamp_min_pct_for_perf_idx(3, min_pct);
++#endif
++}
++EXPORT_SYMBOL_GPL(schedtune_hydrogenx_set_uclamp_min);
++
++void schedtune_hydrogenx_set_prefer_idle(unsigned int prefer_idle)
++{
++	prefer_idle_for_perf_idx(1, !!prefer_idle);
++	prefer_idle_for_perf_idx(3, !!prefer_idle);
++}
++EXPORT_SYMBOL_GPL(schedtune_hydrogenx_set_prefer_idle);
++
+ int group_prefer_idle_read(int group_idx)
+ {
+ 	struct schedtune *ct;
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 000000000000..000000000000 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -41,7 +41,25 @@ config MEMORY_STATE_TIME
+ 	tristate "Memory freq/bandwidth time statistics"
+ 	depends on PROFILING
+ 	help
+ 	  Memory time statistics exported to /sys/kernel/memory_state_time
++
++config HYDROGENX_BOOST
++	bool "HydrogenX global boost/input scene controller"
++	depends on INPUT && CPU_FREQ
++	default y
++	help
++	  Build a global Android performance scene controller under
++	  /sys/kernel/hydrogenx.  It catches input events, exposes boostpulse
++	  knobs, and feeds HydrogenX cpufreq with global floors for generic,
++	  input, frame, GPU, DDR and IO scenes.
++
++	  SchedTune/UCLAMP and MTK GPU/DDR/IO entry points are weak bridge
++	  symbols.  If this vendor tree exports matching strong bridge symbols,
++	  they are called; otherwise the hooks compile to no-ops and the
++	  cpufreq/input side remains active.
++
++	  Say Y for Android gaming/performance kernels.
++
+ config FACTORY_BUILD
+ 	bool "distiguish factory version from dev version"
+ 	default n
+
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index 000000000000..000000000000 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -57,5 +57,6 @@ obj-$(CONFIG_ACCESS_RAMOOPS)     += access_ramoops.o
+ obj-$(CONFIG_UID_SYS_STATS)      += uid_sys_stats.o
+ obj-$(CONFIG_MEMORY_STATE_TIME)  += memory_state_time.o
++obj-$(CONFIG_HYDROGENX_BOOST)    += hydrogenx_boost.o
+ obj-$(CONFIG_MEDIATEK_SOLUTION)  += mediatek/
+ obj-$(CONFIG_MI_GAMEKEY)         += mi_gamekey.o
+ obj-$(CONFIG_GPIO_TESTING_MODE)  += gpio-testing-mode.o
+
+diff --git a/drivers/misc/hydrogenx_boost.c b/drivers/misc/hydrogenx_boost.c
+new file mode 100644
+index 000000000000..000000000000
+--- /dev/null
++++ b/drivers/misc/hydrogenx_boost.c
+@@ -0,0 +1,230 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * HydrogenX boost scene controller.
++ *
++ * This file is intentionally self contained.  It provides:
++ * - a global /sys/kernel/hydrogenx scene interface;
++ * - an input handler that automatically triggers touch/input boosts;
++ * - weak SchedTune/UCLAMP and MTK GPU/DDR bridge calls.  If the vendor tree
++ *   exports matching strong symbols they are used, otherwise these become
++ *   harmless no-ops so the kernel still builds.
++ */
++
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
++
++#include <linux/bitops.h>
++#include <linux/compiler.h>
++#include <linux/hydrogenx_boost.h>
++#include <linux/input.h>
++#include <linux/jiffies.h>
++#include <linux/kernel.h>
++#include <linux/kobject.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/slab.h>
++#include <linux/sysfs.h>
++
++#define HX_DEF_BOOST_MS          180
++#define HX_DEF_INPUT_MS          96
++#define HX_DEF_FRAME_MS          280
++#define HX_DEF_GPU_MS            220
++#define HX_DEF_DDR_MS            220
++#define HX_DEF_IO_MS             180
++#define HX_DEF_GAME_FLOOR_PCT    62
++#define HX_DEF_BOOST_FLOOR_PCT   72
++#define HX_DEF_SCHED_BOOST       12
++#define HX_DEF_UCLAMP_MIN        20
++#define HX_MAX_MS                10000
++#define HX_MAX_BOOST             100
++
++struct hx_ctrl {
++	struct mutex lock;
++	struct kobject *kobj;
++	unsigned long until[HYDROGENX_BOOST_MAX];
++	unsigned int duration_ms[HYDROGENX_BOOST_MAX];
++	unsigned int profile;
++	unsigned int game_mode;
++	unsigned int floor_freq;
++	unsigned int floor_pct;
++	unsigned int boost_floor_pct;
++	unsigned int sched_boost;
++	unsigned int uclamp_min;
++	unsigned int input_hook;
++};
++
++static struct hx_ctrl hx = {
++	.lock = __MUTEX_INITIALIZER(hx.lock),
++	.duration_ms = {
++		[HYDROGENX_BOOST_GENERIC] = HX_DEF_BOOST_MS,
++		[HYDROGENX_BOOST_INPUT] = HX_DEF_INPUT_MS,
++		[HYDROGENX_BOOST_FRAME] = HX_DEF_FRAME_MS,
++		[HYDROGENX_BOOST_GPU] = HX_DEF_GPU_MS,
++		[HYDROGENX_BOOST_DDR] = HX_DEF_DDR_MS,
++		[HYDROGENX_BOOST_IO] = HX_DEF_IO_MS,
++	},
++	.profile = HYDROGENX_BOOST_PROFILE_BALANCED,
++	.game_mode = 0,
++	.floor_freq = 0,
++	.floor_pct = 0,
++	.boost_floor_pct = HX_DEF_BOOST_FLOOR_PCT,
++	.sched_boost = HX_DEF_SCHED_BOOST,
++	.uclamp_min = HX_DEF_UCLAMP_MIN,
++	.input_hook = 1,
++};
++
++void __weak schedtune_hydrogenx_set_boost(int boost) { }
++void __weak schedtune_hydrogenx_set_uclamp_min(unsigned int min_pct) { }
++void __weak mtk_hydrogenx_gpu_boost(unsigned int level) { }
++void __weak mtk_hydrogenx_ddr_boost(unsigned int level) { }
++void __weak mtk_hydrogenx_io_boost(unsigned int level) { }
++
++static bool hx_active_locked(enum hydrogenx_boost_reason reason)
++{
++	return hx.until[reason] && time_before(jiffies, hx.until[reason]);
++}
++
++static bool hx_any_perf_scene_locked(void)
++{
++	return hx.profile == HYDROGENX_BOOST_PROFILE_GAME || hx.game_mode ||
++	       hx_active_locked(HYDROGENX_BOOST_GENERIC) ||
++	       hx_active_locked(HYDROGENX_BOOST_INPUT) ||
++	       hx_active_locked(HYDROGENX_BOOST_FRAME) ||
++	       hx_active_locked(HYDROGENX_BOOST_GPU) ||
++	       hx_active_locked(HYDROGENX_BOOST_DDR) ||
++	       hx_active_locked(HYDROGENX_BOOST_IO);
++}
++
++static void hx_apply_scene_locked(void)
++{
++	bool perf = hx_any_perf_scene_locked();
++	unsigned int sched_boost = perf ? hx.sched_boost : 0;
++	unsigned int uclamp_min = perf ? hx.uclamp_min : 0;
++
++	schedtune_hydrogenx_set_boost(min_t(unsigned int, sched_boost, HX_MAX_BOOST));
++	schedtune_hydrogenx_set_uclamp_min(min_t(unsigned int, uclamp_min, HX_MAX_BOOST));
++
++	mtk_hydrogenx_gpu_boost(hx_active_locked(HYDROGENX_BOOST_GPU) || hx.game_mode);
++	mtk_hydrogenx_ddr_boost(hx_active_locked(HYDROGENX_BOOST_DDR) || hx.game_mode);
++	mtk_hydrogenx_io_boost(hx_active_locked(HYDROGENX_BOOST_IO) || hx.game_mode);
++}
++
++void hydrogenx_boost_pulse(enum hydrogenx_boost_reason reason, unsigned int duration_ms)
++{
++	if (reason >= HYDROGENX_BOOST_MAX)
++		return;
++
++	mutex_lock(&hx.lock);
++	if (!duration_ms)
++		duration_ms = hx.duration_ms[reason];
++	if (duration_ms > HX_MAX_MS)
++		duration_ms = HX_MAX_MS;
++	hx.until[reason] = jiffies + msecs_to_jiffies(duration_ms);
++	hx_apply_scene_locked();
++	mutex_unlock(&hx.lock);
++}
++EXPORT_SYMBOL_GPL(hydrogenx_boost_pulse);
++
++void hydrogenx_boost_get_state(struct hydrogenx_boost_state *state)
++{
++	memset(state, 0, sizeof(*state));
++
++	mutex_lock(&hx.lock);
++	state->boost = hx_active_locked(HYDROGENX_BOOST_GENERIC);
++	state->input = hx_active_locked(HYDROGENX_BOOST_INPUT);
++	state->frame = hx_active_locked(HYDROGENX_BOOST_FRAME);
++	state->gpu = hx_active_locked(HYDROGENX_BOOST_GPU);
++	state->ddr = hx_active_locked(HYDROGENX_BOOST_DDR);
++	state->io = hx_active_locked(HYDROGENX_BOOST_IO);
++	state->profile = hx.profile;
++	state->game_mode = hx.game_mode;
++	state->sched_boost = hx.sched_boost;
++	state->uclamp_min = hx.uclamp_min;
++	state->floor_freq = hx.floor_freq;
++	state->floor_pct = hx.floor_pct;
++
++	if (state->profile == HYDROGENX_BOOST_PROFILE_GAME || state->game_mode)
++		state->floor_pct = max_t(unsigned int, state->floor_pct, HX_DEF_GAME_FLOOR_PCT);
++	if (state->boost || state->input || state->frame || state->gpu || state->ddr || state->io)
++		state->floor_pct = max_t(unsigned int, state->floor_pct, hx.boost_floor_pct);
++	if (state->profile == HYDROGENX_BOOST_PROFILE_BATTERY && !state->boost &&
++	    !state->input && !state->frame)
++		state->floor_pct = 0;
++
++	mutex_unlock(&hx.lock);
++}
++EXPORT_SYMBOL_GPL(hydrogenx_boost_get_state);
++
++static int hx_parse_uint(const char *buf, unsigned int *val)
++{
++	return kstrtouint(buf, 0, val);
++}
++
++#define HX_RW_ATTR(_name, _field, _max)                                      \
++static ssize_t _name##_show(struct kobject *kobj, struct kobj_attribute *a,  \
++				    char *buf)                                      \
++{                                                                            \
++	ssize_t ret;                                                           \
++	mutex_lock(&hx.lock);                                                  \
++	ret = scnprintf(buf, PAGE_SIZE, "%u\n", hx._field);                 \
++	mutex_unlock(&hx.lock);                                                \
++	return ret;                                                            \
++}                                                                            \
++static ssize_t _name##_store(struct kobject *kobj, struct kobj_attribute *a, \
++				     const char *buf, size_t count)                    \
++{                                                                            \
++	unsigned int val;                                                       \
++	if (hx_parse_uint(buf, &val))                                           \
++		return -EINVAL;                                                  \
++	if (val > (_max))                                                       \
++		val = (_max);                                                    \
++	mutex_lock(&hx.lock);                                                  \
++	hx._field = val;                                                        \
++	hx_apply_scene_locked();                                                \
++	mutex_unlock(&hx.lock);                                                \
++	return count;                                                          \
++}                                                                            \
++static struct kobj_attribute _name##_attr = __ATTR(_name, 0644,             \
++						  _name##_show, _name##_store)
++
++HX_RW_ATTR(profile, profile, HYDROGENX_BOOST_PROFILE_BATTERY);
++HX_RW_ATTR(game_mode, game_mode, 1);
++HX_RW_ATTR(floor_freq, floor_freq, UINT_MAX);
++HX_RW_ATTR(floor_pct, floor_pct, 100);
++HX_RW_ATTR(boost_floor_pct, boost_floor_pct, 100);
++HX_RW_ATTR(sched_boost, sched_boost, HX_MAX_BOOST);
++HX_RW_ATTR(uclamp_min, uclamp_min, HX_MAX_BOOST);
++HX_RW_ATTR(input_hook, input_hook, 1);
++HX_RW_ATTR(boost_ms, duration_ms[HYDROGENX_BOOST_GENERIC], HX_MAX_MS);
++HX_RW_ATTR(input_boost_ms, duration_ms[HYDROGENX_BOOST_INPUT], HX_MAX_MS);
++HX_RW_ATTR(frame_boost_ms, duration_ms[HYDROGENX_BOOST_FRAME], HX_MAX_MS);
++HX_RW_ATTR(gpu_boost_ms, duration_ms[HYDROGENX_BOOST_GPU], HX_MAX_MS);
++HX_RW_ATTR(ddr_boost_ms, duration_ms[HYDROGENX_BOOST_DDR], HX_MAX_MS);
++HX_RW_ATTR(io_boost_ms, duration_ms[HYDROGENX_BOOST_IO], HX_MAX_MS);
++
++static ssize_t status_show(struct kobject *kobj, struct kobj_attribute *a, char *buf)
++{
++	struct hydrogenx_boost_state st;
++
++	hydrogenx_boost_get_state(&st);
++	return scnprintf(buf, PAGE_SIZE,
++		"profile=%u game_mode=%u boost=%u input=%u frame=%u gpu=%u ddr=%u io=%u floor_freq=%u floor_pct=%u sched_boost=%u uclamp_min=%u\n",
++		st.profile, st.game_mode, st.boost, st.input, st.frame, st.gpu,
++		st.ddr, st.io, st.floor_freq, st.floor_pct, st.sched_boost,
++		st.uclamp_min);
++}
++static struct kobj_attribute status_attr = __ATTR_RO(status);
++
++static ssize_t version_show(struct kobject *kobj, struct kobj_attribute *a, char *buf)
++{
++	return scnprintf(buf, PAGE_SIZE, "%s\n", HYDROGENX_BOOST_VERSION);
++}
++static struct kobj_attribute version_attr = __ATTR_RO(version);
++
++static ssize_t builtins_show(struct kobject *kobj, struct kobj_attribute *a, char *buf)
++{
++	return scnprintf(buf, PAGE_SIZE,
++		"governor_force_builtin=1\ncpufreq_governor=hydrogenx\nboost_controller=%d\ninput_hook=%u\n",
++		IS_ENABLED(CONFIG_HYDROGENX_BOOST), READ_ONCE(hx.input_hook));
++}
++static struct kobj_attribute builtins_attr = __ATTR_RO(builtins);
++
+
++#define HX_PULSE_ATTR(_name, _reason)                                      \
++static ssize_t _name##_store(struct kobject *kobj, struct kobj_attribute *a,\
++				     const char *buf, size_t count)                  \
++{                                                                          \
++	unsigned int val;                                                     \
++	if (hx_parse_uint(buf, &val))                                         \
++		return -EINVAL;                                                \
++	if (val)                                                             \
++		hydrogenx_boost_pulse(_reason, 0);                            \
++	return count;                                                        \
++}                                                                          \
++static struct kobj_attribute _name##_attr = __ATTR(_name, 0200, NULL,      \
++						  _name##_store)
++
++HX_PULSE_ATTR(boostpulse, HYDROGENX_BOOST_GENERIC);
++HX_PULSE_ATTR(input_boostpulse, HYDROGENX_BOOST_INPUT);
++HX_PULSE_ATTR(frame_boost, HYDROGENX_BOOST_FRAME);
++HX_PULSE_ATTR(gpu_boost, HYDROGENX_BOOST_GPU);
++HX_PULSE_ATTR(ddr_boost, HYDROGENX_BOOST_DDR);
++HX_PULSE_ATTR(io_boost, HYDROGENX_BOOST_IO);
++
++static struct attribute *hx_attrs[] = {
++	&profile_attr.attr,
++	&game_mode_attr.attr,
++	&floor_freq_attr.attr,
++	&floor_pct_attr.attr,
++	&boost_floor_pct_attr.attr,
++	&sched_boost_attr.attr,
++	&uclamp_min_attr.attr,
++	&input_hook_attr.attr,
++	&boost_ms_attr.attr,
++	&input_boost_ms_attr.attr,
++	&frame_boost_ms_attr.attr,
++	&gpu_boost_ms_attr.attr,
++	&ddr_boost_ms_attr.attr,
++	&io_boost_ms_attr.attr,
++	&boostpulse_attr.attr,
++	&input_boostpulse_attr.attr,
++	&frame_boost_attr.attr,
++	&gpu_boost_attr.attr,
++	&ddr_boost_attr.attr,
++	&io_boost_attr.attr,
++	&status_attr.attr,
++	&version_attr.attr,
++	&builtins_attr.attr,
++	NULL,
++};
++ATTRIBUTE_GROUPS(hx);
++
++static void hx_input_event(struct input_handle *handle, unsigned int type,
++			   unsigned int code, int value)
++{
++	if (!READ_ONCE(hx.input_hook) || !value)
++		return;
++
++	if (type == EV_ABS || type == EV_REL || type == EV_KEY) {
++		hydrogenx_boost_pulse(HYDROGENX_BOOST_INPUT, 0);
++		if (READ_ONCE(hx.game_mode))
++			hydrogenx_boost_pulse(HYDROGENX_BOOST_FRAME, 0);
++	}
++}
++
++static int hx_input_connect(struct input_handler *handler,
++			    struct input_dev *dev,
++			    const struct input_device_id *id)
++{
++	struct input_handle *handle;
++	int ret;
++
++	if (!test_bit(EV_ABS, dev->evbit) && !test_bit(EV_REL, dev->evbit) &&
++	    !test_bit(EV_KEY, dev->evbit))
++		return -ENODEV;
++
++	handle = kzalloc(sizeof(*handle), GFP_KERNEL);
++	if (!handle)
++		return -ENOMEM;
++
++	handle->dev = dev;
++	handle->handler = handler;
++	handle->name = "hydrogenx_boost";
++
++	ret = input_register_handle(handle);
++	if (ret)
++		goto err_free;
++
++	ret = input_open_device(handle);
++	if (ret)
++		goto err_unregister;
++
++	return 0;
++
++err_unregister:
++	input_unregister_handle(handle);
++err_free:
++	kfree(handle);
++	return ret;
++}
++
++static void hx_input_disconnect(struct input_handle *handle)
++{
++	input_close_device(handle);
++	input_unregister_handle(handle);
++	kfree(handle);
++}
++
++static const struct input_device_id hx_input_ids[] = {
++	{ .driver_info = 1 },
++	{ },
++};
++MODULE_DEVICE_TABLE(input, hx_input_ids);
++
++static struct input_handler hx_input_handler = {
++	.event = hx_input_event,
++	.connect = hx_input_connect,
++	.disconnect = hx_input_disconnect,
++	.name = "hydrogenx_boost",
++	.id_table = hx_input_ids,
++};
++
++static int __init hydrogenx_boost_init(void)
++{
++	int ret;
++
++	hx.kobj = kobject_create_and_add("hydrogenx", kernel_kobj);
++	if (!hx.kobj)
++		return -ENOMEM;
++
++	ret = sysfs_create_groups(hx.kobj, hx_groups);
++	if (ret)
++		goto err_kobj;
++
++	ret = input_register_handler(&hx_input_handler);
++	if (ret)
++		goto err_sysfs;
++
++	pr_info("boost scene controller %s loaded\n", HYDROGENX_BOOST_VERSION);
++	return 0;
++
++err_sysfs:
++	sysfs_remove_groups(hx.kobj, hx_groups);
++err_kobj:
++	kobject_put(hx.kobj);
++	return ret;
++}
++
++static void __exit hydrogenx_boost_exit(void)
++{
++	input_unregister_handler(&hx_input_handler);
++	sysfs_remove_groups(hx.kobj, hx_groups);
++	kobject_put(hx.kobj);
++}
++
++module_init(hydrogenx_boost_init);
++module_exit(hydrogenx_boost_exit);
++
++MODULE_AUTHOR("ChatGPT");
++MODULE_DESCRIPTION("HydrogenX global boost/input scene controller v10");
++MODULE_LICENSE("GPL");
+
+diff --git a/lib/Kconfig b/lib/Kconfig
+index 000000000000..000000000000 100644
+--- a/lib/Kconfig
++++ b/lib/Kconfig
+@@ -221,6 +221,52 @@ config LZ4HC_COMPRESS
+ 	tristate
+ config LZ4_DECOMPRESS
+ 	tristate
++
++config LZ4K_COMPRESS
++	tristate "LZ4K compatibility compressor alias"
++	select LZ4_COMPRESS
++	help
++	  Compatibility switch for Android zram scripts that look for
++	  CONFIG_LZ4K_COMPRESS. This tree does not ship a dedicated LZ4K codec;
++	  enabling this selects the stock in-tree LZ4 compressor so defconfig
++	  merge paths no longer silently drop the symbol.
++
++config LZ4K_DECOMPRESS
++	tristate "LZ4K compatibility decompressor alias"
++	select LZ4_DECOMPRESS
++	help
++	  Compatibility switch for Android zram scripts that look for
++	  CONFIG_LZ4K_DECOMPRESS. It selects the stock in-tree LZ4 decompressor.
++
++config LZ4KD_COMPRESS
++	tristate "LZ4KD compatibility compressor alias"
++	select LZ4_COMPRESS
++	help
++	  Compatibility switch for kernels/userspace expecting an LZ4KD config
++	  symbol. This is an alias to the stock LZ4 backend unless a real LZ4KD
++	  implementation is later added to the tree.
++
++config LZ4KD_DECOMPRESS
++	tristate "LZ4KD compatibility decompressor alias"
++	select LZ4_DECOMPRESS
++	help
++	  Compatibility switch for kernels/userspace expecting an LZ4KD config
++	  symbol. This is an alias to the stock LZ4 backend.
++
++config LZ4K_OPLUS_COMPRESS
++	tristate "Oplus LZ4K compatibility compressor alias"
++	select LZ4_COMPRESS
++	help
++	  Compatibility switch for Oplus-style defconfigs. It keeps the option
++	  visible and selects stock LZ4 until the actual Oplus LZ4K source is
++	  imported for this 4.14 tree.
++
++config LZ4K_OPLUS_DECOMPRESS
++	tristate "Oplus LZ4K compatibility decompressor alias"
++	select LZ4_DECOMPRESS
++	help
++	  Compatibility switch for Oplus-style defconfigs. It selects stock LZ4.
++
+ config ZSTD_COMPRESS
+ 	select XXHASH
+ 	tristate
+
+diff --git a/include/linux/hydrogenx_boost.h b/include/linux/hydrogenx_boost.h
+new file mode 100644
+index 000000000000..000000000000
+--- /dev/null
++++ b/include/linux/hydrogenx_boost.h
+@@ -0,0 +1,53 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _LINUX_HYDROGENX_BOOST_H
++#define _LINUX_HYDROGENX_BOOST_H
++
++#include <linux/types.h>
++#include <linux/string.h>
++
++#define HYDROGENX_BOOST_PROFILE_BALANCED 0
++#define HYDROGENX_BOOST_PROFILE_GAME     1
++#define HYDROGENX_BOOST_VERSION          "v10-audited-tree"
++#define HYDROGENX_BOOST_VERSION_CODE     10
++
++#define HYDROGENX_BOOST_PROFILE_BATTERY  2
++
++enum hydrogenx_boost_reason {
++	HYDROGENX_BOOST_GENERIC = 0,
++	HYDROGENX_BOOST_INPUT,
++	HYDROGENX_BOOST_FRAME,
++	HYDROGENX_BOOST_GPU,
++	HYDROGENX_BOOST_DDR,
++	HYDROGENX_BOOST_IO,
++	HYDROGENX_BOOST_MAX,
++};
++
++struct hydrogenx_boost_state {
++	bool boost;
++	bool input;
++	bool frame;
++	bool gpu;
++	bool ddr;
++	bool io;
++	unsigned int profile;
++	unsigned int game_mode;
++	unsigned int sched_boost;
++	unsigned int uclamp_min;
++	unsigned int floor_freq;
++	unsigned int floor_pct;
++};
++
++#ifdef CONFIG_HYDROGENX_BOOST
++void hydrogenx_boost_pulse(enum hydrogenx_boost_reason reason, unsigned int duration_ms);
++void hydrogenx_boost_get_state(struct hydrogenx_boost_state *state);
++#else
++static inline void hydrogenx_boost_pulse(enum hydrogenx_boost_reason reason,
++						 unsigned int duration_ms) { }
++static inline void hydrogenx_boost_get_state(struct hydrogenx_boost_state *state)
++{
++	memset(state, 0, sizeof(*state));
++	state->profile = HYDROGENX_BOOST_PROFILE_BALANCED;
++}
++#endif
++
++#endif /* _LINUX_HYDROGENX_BOOST_H */
+
+diff --git a/kernel/configs/hydrogenx-pissarro.config b/kernel/configs/hydrogenx-pissarro.config
+new file mode 100644
+index 000000000000..000000000000
+--- /dev/null
++++ b/kernel/configs/hydrogenx-pissarro.config
+@@ -0,0 +1,81 @@
++# HydrogenX v10 config fragment for pissarro / MT6877 / Android 4.14
++# This is a reference fragment only. The patch also edits the three pissarro defconfigs.
++# Keep schedutil available for A/B testing while making hydrogenx the default.
++CONFIG_CPU_FREQ=y
++CONFIG_CPU_FREQ_STAT=y
++CONFIG_CPU_FREQ_TIMES=y
++CONFIG_CPU_FREQ_GOV_ATTR_SET=y
++CONFIG_CPU_FREQ_GOV_COMMON=y
++CONFIG_CPU_FREQ_GOV_PERFORMANCE=y
++CONFIG_CPU_FREQ_GOV_POWERSAVE=y
++CONFIG_CPU_FREQ_GOV_USERSPACE=y
++CONFIG_CPU_FREQ_GOV_ONDEMAND=y
++CONFIG_CPU_FREQ_GOV_CONSERVATIVE=y
++CONFIG_CPU_FREQ_GOV_INTERACTIVE=y
++CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
++CONFIG_CPU_FREQ_GOV_HYDROGENX=y
++CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX=y
++CONFIG_HYDROGENX_BOOST=y
++
++# zram / swap / memory compression
++CONFIG_ZRAM=y
++CONFIG_ZRAM_WRITEBACK=y
++CONFIG_ZRAM_MEMORY_TRACKING=y
++CONFIG_ZSMALLOC=y
++CONFIG_ZSMALLOC_STAT=y
++CONFIG_ZSWAP=y
++CONFIG_ZPOOL=y
++CONFIG_ZBUD=y
++CONFIG_Z3FOLD=y
++
++# filesystems
++CONFIG_F2FS_FS=y
++CONFIG_F2FS_FS_XATTR=y
++CONFIG_F2FS_FS_POSIX_ACL=y
++CONFIG_F2FS_FS_SECURITY=y
++CONFIG_F2FS_FS_ENCRYPTION=y
++CONFIG_F2FS_FS_COMPRESSION=y
++CONFIG_F2FS_FS_LZO=y
++CONFIG_F2FS_FS_LZ4=y
++CONFIG_F2FS_FS_ZSTD=y
++CONFIG_EROFS_FS=y
++CONFIG_EROFS_FS_XATTR=y
++CONFIG_EROFS_FS_POSIX_ACL=y
++CONFIG_EROFS_FS_SECURITY=y
++CONFIG_EROFS_FS_ZIP=y
++
++# compression backends
++CONFIG_CRYPTO_LZO=y
++CONFIG_CRYPTO_LZ4=y
++CONFIG_CRYPTO_LZ4HC=y
++CONFIG_CRYPTO_ZSTD=y
++CONFIG_LZO_COMPRESS=y
++CONFIG_LZO_DECOMPRESS=y
++CONFIG_LZ4_COMPRESS=y
++CONFIG_LZ4_DECOMPRESS=y
++CONFIG_LZ4HC_COMPRESS=y
++CONFIG_ZSTD_COMPRESS=y
++CONFIG_ZSTD_DECOMPRESS=y
++CONFIG_XXHASH=y
++
++# compatibility aliases. These are stock-LZ4 backed unless real vendor sources are imported.
++CONFIG_LZ4K_COMPRESS=y
++CONFIG_LZ4K_DECOMPRESS=y
++CONFIG_LZ4KD_COMPRESS=y
++CONFIG_LZ4KD_DECOMPRESS=y
++CONFIG_LZ4K_OPLUS_COMPRESS=y
++CONFIG_LZ4K_OPLUS_DECOMPRESS=y
++
++# IO / network QoS. Missing symbols are harmless under olddefconfig.
++CONFIG_NET_SCH_FQ=y
++CONFIG_NET_SCH_FQ_CODEL=y
++CONFIG_NET_SCH_CAKE=y
++CONFIG_TCP_CONG_BBR=y
++CONFIG_DEFAULT_BBR=y
++CONFIG_TCP_CONG_WESTWOOD=y
++CONFIG_TCP_CONG_CUBIC=y
++CONFIG_DEFAULT_TCP_CONG="bbr"
++CONFIG_IOSCHED_CFQ=y
++CONFIG_IOSCHED_DEADLINE=y
++CONFIG_IOSCHED_NOOP=y
++CONFIG_DEFAULT_CFQ=y
+diff --git a/Documentation/hydrogenx-v10-audited-pissarro.rst b/Documentation/hydrogenx-v10-audited-pissarro.rst
+new file mode 100644
+index 000000000000..000000000000
+--- /dev/null
++++ b/Documentation/hydrogenx-v10-audited-pissarro.rst
+@@ -0,0 +1,1239 @@
++HydrogenX v10 for pissarro / MT6877 / Linux 4.14
++=====================================================
++
++This document is installed by the patch so the kernel tree carries its own
++verification checklist.  It exists because a governor that compiles but does
++not appear in scaling_available_governors is a failed integration, not a tuning
++problem.  v10 treats visibility, default selection, and runtime self-checks as
++first-class requirements.
++
++Design rules
++------------
++
++1. hydrogenx must be built through CONFIG_CPU_FREQ_GOV_HYDROGENX, not by
++   blindly linking it whenever CONFIG_CPU_FREQ is enabled.  The governor uses
++   the dbs common core, so the Kconfig selection must also select the common
++   governor helpers.
++2. schedutil remains enabled.  v10 does not remove schedutil because schedutil is
++   the baseline for scheduler-provided utilization and for A/B comparison.
++3. the clean pissarro defconfigs select CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX.
++   This makes a clean build boot into hydrogenx without init scripts.
++4. /sys/kernel/hydrogenx exposes global state.  If the governor sysfs tree is
++   absent but /sys/kernel/hydrogenx exists, cpufreq registration failed.  If the
++   cpufreq governor exists but /sys/kernel/hydrogenx is absent, boost controller
++   registration failed.
++5. vendor hooks are weak.  Missing MTK GPU/DDR symbols must not break a build.
++   The cpufreq/input path should still work.
++
++Runtime nodes
++-------------
++
++/sys/kernel/hydrogenx/version
++    Expected value: v10-audited-tree.
++
++/sys/kernel/hydrogenx/builtins
++    Prints the enabled bridge categories and confirms that the controller is
++    present in the running kernel.
++
++/sys/kernel/hydrogenx/status
++    Prints profile, game_mode, active boost pulses, floors, sched boost, uclamp
++    min, and whether input_hook is enabled.
++
++/sys/devices/system/cpu/cpufreq/policy*/scaling_available_governors
++    Must include hydrogenx.  If it does not, inspect dmesg for the registration
++    message from cpufreq_hydrogenx.c.
++
++Tuning philosophy
++-----------------
++
++The governor is intentionally not a pure performance lock.  It applies floors
++only when load, input, frame, game, or userspace scene signals justify the
++extra cost.  This is closer to an Android gaming kernel than a desktop
++performance governor: high short burst response, moderate sustained floor, and
++slow ramp-down to avoid oscillation.
++
++Profile: balanced
++-----------------
++
++Purpose: daily mixed UI, social apps, light gaming.
++
++Recommended baseline values::
++
++    echo 0 > /sys/kernel/hydrogenx/profile
++    echo 0 > /sys/kernel/hydrogenx/game_mode
++    echo 82 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/up_threshold
++    echo 32 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/down_threshold
++    echo 58 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/hispeed_load
++    echo 72 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/min_sample_time
++    echo 80 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/powersave_bias
++
++Expected behavior:
++
++* Up-ramp begins when smoothed load approaches 82 percent.
++* Hispeed floor appears around 58 percent load or during active scene pulses.
++* Down-ramp is delayed for about 72 ms to reduce oscillation.
++* Powersave bias value 80 keeps low-load frequency conservative.
++
++Profile: game
++-------------
++
++Purpose: games, emulators, recording, touch-heavy sessions.
++
++Recommended baseline values::
++
++    echo 1 > /sys/kernel/hydrogenx/profile
++    echo 1 > /sys/kernel/hydrogenx/game_mode
++    echo 72 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/up_threshold
++    echo 24 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/down_threshold
++    echo 45 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/hispeed_load
++    echo 90 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/min_sample_time
++    echo 0 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/powersave_bias
++
++Expected behavior:
++
++* Up-ramp begins when smoothed load approaches 72 percent.
++* Hispeed floor appears around 45 percent load or during active scene pulses.
++* Down-ramp is delayed for about 90 ms to reduce oscillation.
++* Powersave bias value 0 is disabled for maximum frame stability.
++
++Profile: battery
++----------------
++
++Purpose: standby, reading, background download, heat recovery.
++
++Recommended baseline values::
++
++    echo 2 > /sys/kernel/hydrogenx/profile
++    echo 0 > /sys/kernel/hydrogenx/game_mode
++    echo 90 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/up_threshold
++    echo 38 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/down_threshold
++    echo 72 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/hispeed_load
++    echo 120 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/min_sample_time
++    echo 180 > /sys/devices/system/cpu/cpufreq/policy0/hydrogenx/powersave_bias
++
++Expected behavior:
++
++* Up-ramp begins when smoothed load approaches 90 percent.
++* Hispeed floor appears around 72 percent load or during active scene pulses.
++* Down-ramp is delayed for about 120 ms to reduce oscillation.
++* Powersave bias value 180 keeps low-load frequency conservative.
++
++Verification case 01
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 02
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 03
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 04
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 05
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 06
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 07
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 08
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 09
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 10
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 11
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 12
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 13
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 14
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 15
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 16
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 17
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 18
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 19
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 20
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 21
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 22
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 23
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 24
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 25
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 26
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 27
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 28
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 29
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 30
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 31
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 32
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 33
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 34
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 35
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 36
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 37
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 38
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 39
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
++
++Verification case 40
++~~~~~~~~~~~~~~~~~~~~~~~~
++
++Command set::
++
++    echo hydrogenx > /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
++    echo 1 > /sys/kernel/hydrogenx/boostpulse
++    cat /sys/kernel/hydrogenx/status
++    cat /sys/devices/system/cpu/cpufreq/policy0/scaling_cur_freq
++
++Expected result:
++
++The available governors list contains hydrogenx, the active governor switches
++without EINVAL, status shows a nonzero generic boost window immediately after
++boostpulse, and scaling_cur_freq should rise toward the selected floor.  If the
++boost window appears but frequency does not move, the cpufreq driver or thermal
++limit is clamping the request.  If the boost window does not appear, the global
++controller did not initialize.  If hydrogenx is missing from the governor list,
++registration failed before policy init.
++
++Failure isolation:
++
++* Missing /sys/kernel/hydrogenx/version: CONFIG_HYDROGENX_BOOST was not built.
++* Missing governor only: inspect dmesg for cpufreq_register_governor errors.
++* Governor present but no per-policy tunables: cpufreq dbs attr setup failed.
++* Tunables present but no performance effect: thermal, MTK DVFS, or policy max
++  clamp is stronger than the governor request.
+diff --git a/scripts/hydrogenx/verify-hydrogenx.sh b/scripts/hydrogenx/verify-hydrogenx.sh
+new file mode 100755
+index 000000000000..000000000000
+--- /dev/null
++++ b/scripts/hydrogenx/verify-hydrogenx.sh
+@@ -0,0 +1,68 @@
++#!/system/bin/sh
++# HydrogenX v10 runtime verifier for Android shells.
++# This script is optional. The kernel patch does not require it to boot.
++
++HX=/sys/kernel/hydrogenx
++CPUFREQ=/sys/devices/system/cpu/cpufreq
++fail=0
++
++say() { echo "[hydrogenx-verify] $*"; }
++err() { echo "[hydrogenx-verify][FAIL] $*"; fail=1; }
++warn() { echo "[hydrogenx-verify][WARN] $*"; }
++
++say "checking global controller"
++if [ ! -d "$HX" ]; then
++    err "$HX is missing; CONFIG_HYDROGENX_BOOST did not initialize"
++else
++    [ -f "$HX/version" ] && say "version=$(cat $HX/version)" || err "version node missing"
++    [ -f "$HX/builtins" ] && say "builtins=$(cat $HX/builtins)" || warn "builtins node missing"
++    [ -f "$HX/status" ] && cat "$HX/status" || warn "status node missing"
++fi
++
++say "checking cpufreq policies"
++for p in "$CPUFREQ"/policy*; do
++    [ -d "$p" ] || continue
++    govs="$p/scaling_available_governors"
++    cur="$p/scaling_governor"
++    if [ ! -f "$govs" ]; then
++        err "$p has no scaling_available_governors"
++        continue
++    fi
++    list=$(cat "$govs")
++    say "$p governors=$list"
++    echo "$list" | grep -qw hydrogenx || err "$p missing hydrogenx governor"
++    if echo "$list" | grep -qw hydrogenx; then
++        old=$(cat "$cur" 2>/dev/null)
++        echo hydrogenx > "$cur" 2>/dev/null || err "$p cannot switch to hydrogenx"
++        new=$(cat "$cur" 2>/dev/null)
++        say "$p active=$new old=$old"
++        [ -d "$p/hydrogenx" ] || warn "$p/hydrogenx tunable dir missing; global governor mode may be used"
++    fi
++ done
++
++say "checking scene pulses"
++if [ -d "$HX" ]; then
++    for n in boostpulse input_boostpulse frame_boost gpu_boost ddr_boost io_boost; do
++        if [ -f "$HX/$n" ]; then
++            echo 1 > "$HX/$n" 2>/dev/null || warn "cannot write $n"
++            say "wrote $n"
++        else
++            warn "$n node missing"
++        fi
++    done
++    [ -f "$HX/status" ] && cat "$HX/status"
++fi
++
++say "checking f2fs/erofs/zram configs from /proc/config.gz if present"
++if [ -f /proc/config.gz ]; then
++    zcat /proc/config.gz | grep -E "CONFIG_(CPU_FREQ_GOV_HYDROGENX|HYDROGENX_BOOST|F2FS_FS_COMPRESSION|EROFS_FS_ZIP|ZRAM_WRITEBACK|LZ4|ZSTD|TCP_CONG_BBR)" || warn "no matching config lines found"
++else
++    warn "/proc/config.gz unavailable"
++fi
++
++if [ "$fail" -eq 0 ]; then
++    say "PASS"
++else
++    say "FAIL"
++fi
++exit "$fail"
+diff --git a/scripts/hydrogenx/apply-gaming-profile.sh b/scripts/hydrogenx/apply-gaming-profile.sh
+new file mode 100755
+index 000000000000..000000000000
+--- /dev/null
++++ b/scripts/hydrogenx/apply-gaming-profile.sh
+@@ -0,0 +1,40 @@
++#!/system/bin/sh
++# Optional HydrogenX v10 gaming profile helper.
++# It writes every policy that exists; missing nodes are skipped safely.
++
++HX=/sys/kernel/hydrogenx
++CPUFREQ=/sys/devices/system/cpu/cpufreq
++write_if() { [ -f "$1" ] && echo "$2" > "$1" 2>/dev/null; }
++
++write_if "$HX/profile" 1
++write_if "$HX/game_mode" 1
++write_if "$HX/sched_boost" 18
++write_if "$HX/uclamp_min" 18
++write_if "$HX/floor_pct" 45
++write_if "$HX/boost_floor_pct" 82
++write_if "$HX/input_hook" 1
++write_if "$HX/boostpulse" 1
++write_if "$HX/frame_boost" 1
++write_if "$HX/gpu_boost" 1
++write_if "$HX/ddr_boost" 1
++
++for p in "$CPUFREQ"/policy*; do
++    [ -d "$p" ] || continue
++    write_if "$p/scaling_governor" hydrogenx
++    H="$p/hydrogenx"
++    [ -d "$H" ] || continue
++    write_if "$H/profile" 1
++    write_if "$H/game_mode" 1
++    write_if "$H/sampling_rate" 6000
++    write_if "$H/up_threshold" 72
++    write_if "$H/down_threshold" 24
++    write_if "$H/hispeed_load" 45
++    write_if "$H/max_perf_load" 88
++    write_if "$H/low_power_load" 14
++    write_if "$H/min_sample_time" 90
++    write_if "$H/powersave_bias" 0
++    write_if "$H/load_smoothing" 35
++    write_if "$H/boost_duration_ms" 220
++    write_if "$H/input_boost_ms" 96
++    write_if "$H/frame_boost_ms" 300
++ done
+diff --git a/scripts/hydrogenx/boot-health-report.sh b/scripts/hydrogenx/boot-health-report.sh
+new file mode 100755
+index 000000000000..000000000000
+--- /dev/null
++++ b/scripts/hydrogenx/boot-health-report.sh
+@@ -0,0 +1,28 @@
++#!/system/bin/sh
++# Compact HydrogenX v10 boot health report.
++
++HX=/sys/kernel/hydrogenx
++CPUFREQ=/sys/devices/system/cpu/cpufreq
++
++echo "== HydrogenX =="
++[ -d "$HX" ] && { cat "$HX/version" 2>/dev/null; cat "$HX/status" 2>/dev/null; } || echo "missing $HX"
++
++echo "== CPUFreq =="
++for p in "$CPUFREQ"/policy*; do
++    [ -d "$p" ] || continue
++    echo "-- $p --"
++    cat "$p/scaling_available_governors" 2>/dev/null
++    cat "$p/scaling_governor" 2>/dev/null
++    cat "$p/scaling_min_freq" "$p/scaling_cur_freq" "$p/scaling_max_freq" 2>/dev/null
++ done
++
++echo "== ZRAM =="
++for z in /sys/block/zram*; do
++    [ -d "$z" ] || continue
++    echo "-- $z --"
++    cat "$z/comp_algorithm" 2>/dev/null
++    cat "$z/mm_stat" 2>/dev/null
++ done
++
++echo "== Config =="
++[ -f /proc/config.gz ] && zcat /proc/config.gz | grep -E "HYDROGENX|F2FS_FS_COMPRESSION|EROFS_FS_ZIP|ZRAM_WRITEBACK|TCP_CONG_BBR" || true
