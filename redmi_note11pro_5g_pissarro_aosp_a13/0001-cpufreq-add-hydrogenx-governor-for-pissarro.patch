@@ -1,0 +1,678 @@
+From 4aa4f23a9b0e28d56598f2e4df9d6e7a9f0b4c21 Mon Sep 17 00:00:00 2001
+From: ChatGPT <patches@example.invalid>
+Date: Fri, 1 May 2026 00:00:00 +0000
+Subject: [PATCH] cpufreq: add hydrogenx governor for pissarro
+
+Add a lightweight third-party cpufreq governor named hydrogenx.  It is
+based on the kernel 4.14 dbs governor framework used by ondemand and is
+intended for MT6877/pissarro-style Android kernels where fast ramp-up,
+slower ramp-down and userspace boost pulses are useful for frame pacing.
+
+The governor exposes tunables under the governor sysfs directory:
+sampling_rate, up_threshold, down_threshold, hispeed_load, hispeed_freq,
+min_sample_time, powersave_bias, fast_ramp_down, boost_duration_ms,
+boostpulse, ignore_nice_load and io_is_busy.
+
+Enable hydrogenx as the default governor in the pissarro defconfigs.
+---
+ arch/arm64/configs/pissarro_debug_defconfig    |   4 +-
+ arch/arm64/configs/pissarro_defconfig          |   3 +-
+ arch/arm64/configs/pissarro_stability_defconfig|   4 +-
+ drivers/cpufreq/Kconfig                        |  35 ++
+ drivers/cpufreq/Makefile                       |   1 +
+ drivers/cpufreq/cpufreq_hydrogenx.c            | 418 +++++++++++++++++++++++++
+ 6 files changed, 460 insertions(+), 5 deletions(-)
+ create mode 100644 drivers/cpufreq/cpufreq_hydrogenx.c
+
+diff --git a/arch/arm64/configs/pissarro_debug_defconfig b/arch/arm64/configs/pissarro_debug_defconfig
+index 000000000000..000000000000 100644
+--- a/arch/arm64/configs/pissarro_debug_defconfig
++++ b/arch/arm64/configs/pissarro_debug_defconfig
+@@ -1399,11 +1399,13 @@ CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+ CONFIG_CPU_FREQ=y
+ 
+ CONFIG_CPU_FREQ_STAT=y
+ 
+-CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
++CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX=y
+ 
+ CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+ 
+ CONFIG_CPU_FREQ_GOV_USERSPACE=y
+ 
+ CONFIG_CPU_FREQ_GOV_ONDEMAND=y
++
++CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
++
++CONFIG_CPU_FREQ_GOV_HYDROGENX=y
+ 
+ CONFIG_XFRM_MIGRATE=y
+diff --git a/arch/arm64/configs/pissarro_defconfig b/arch/arm64/configs/pissarro_defconfig
+index 000000000000..000000000000 100644
+--- a/arch/arm64/configs/pissarro_defconfig
++++ b/arch/arm64/configs/pissarro_defconfig
+@@ -2350,7 +2350,7 @@ CONFIG_CPU_FREQ_TIMES=y
+ 
+ CONFIG_CPU_FREQ_STAT=y
+ 
+-CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
++CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX=y
+ 
+ CONFIG_CPU_FREQ_GOV_ATTR_SET=y
+ 
+@@ -2358,6 +2358,7 @@ CONFIG_CPU_FREQ_GOV_CONSERVATIVE=y
+ 
+ CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+ 
++CONFIG_CPU_FREQ_GOV_HYDROGENX=y
+ CONFIG_CPU_FREQ_GOV_BLU_SCHEDUTIL=y
+ 
+ CONFIG_CPU_FREQ_GOV_ELECTROUTIL=y
+diff --git a/arch/arm64/configs/pissarro_stability_defconfig b/arch/arm64/configs/pissarro_stability_defconfig
+index 000000000000..000000000000 100644
+--- a/arch/arm64/configs/pissarro_stability_defconfig
++++ b/arch/arm64/configs/pissarro_stability_defconfig
+@@ -1443,11 +1443,13 @@ CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y
+ CONFIG_CPU_FREQ=y
+ 
+ CONFIG_CPU_FREQ_STAT=y
+ 
+-CONFIG_CPU_FREQ_DEFAULT_GOV_SCHEDUTIL=y
++CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX=y
+ 
+ CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+ 
+ CONFIG_CPU_FREQ_GOV_USERSPACE=y
+ 
+ CONFIG_CPU_FREQ_GOV_ONDEMAND=y
++
++CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
++
++CONFIG_CPU_FREQ_GOV_HYDROGENX=y
+ 
+ CONFIG_XFRM_MIGRATE=y
+diff --git a/drivers/cpufreq/Kconfig b/drivers/cpufreq/Kconfig
+index 000000000000..000000000000 100644
+--- a/drivers/cpufreq/Kconfig
++++ b/drivers/cpufreq/Kconfig
+@@ -77,6 +77,19 @@ config CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+ 
+ 	  Use the 'schedutil' CPUFreq governor by default. If unsure,
+ 	  have a look at the help section of that governor. The fallback
+ 	  governor will be 'performance'.
++
++config CPU_FREQ_DEFAULT_GOV_HYDROGENX
++	bool "hydrogenx"
++	depends on SMP
++	select CPU_FREQ_GOV_HYDROGENX
++	select CPU_FREQ_GOV_PERFORMANCE
++	help
++	  Use the 'hydrogenx' CPUFreq governor by default.
++
++	  This governor is tuned for Android phones that need fast response
++	  under UI/game bursts, but also need slower ramp-down and optional
++	  powersave bias to reduce frequency bouncing and heat.
++	  The fallback governor will be 'performance'.
+ 
+ endchoice
+@@ -148,6 +161,28 @@ config CPU_FREQ_GOV_SCHEDUTIL
+ 
+ 	  If in doubt, say N.
++
++config CPU_FREQ_GOV_HYDROGENX
++	bool "'hydrogenx' cpufreq policy governor"
++	depends on CPU_FREQ && SMP
++	select CPU_FREQ_GOV_COMMON
++	help
++	  'hydrogenx' is a third-party Android-oriented dynamic cpufreq
++	  governor.  It uses the common dbs governor framework, but changes
++	  the policy to prefer:
++
++	  - fast ramp-up when CPU load crosses up_threshold;
++	  - a configurable hispeed floor for frame-sensitive loads;
++	  - delayed ramp-down through min_sample_time to reduce FPS jitter;
++	  - optional powersave_bias for lower heat and power at light load;
++	  - userspace boostpulse support for game/touch/performance daemons.
++
++	  Tunables are exported below the governor sysfs directory.  On
++	  Android this is usually under:
++
++	    /sys/devices/system/cpu/cpufreq/<policy>/hydrogenx/
++
++	  If in doubt, say N.
+ 
+ comment "CPU frequency scaling drivers"
+diff --git a/drivers/cpufreq/Makefile b/drivers/cpufreq/Makefile
+index 000000000000..000000000000 100644
+--- a/drivers/cpufreq/Makefile
++++ b/drivers/cpufreq/Makefile
+@@ -13,6 +13,7 @@ obj-$(CONFIG_CPU_FREQ_GOV_USERSPACE)      += cpufreq_userspace.o
+ obj-$(CONFIG_CPU_FREQ_GOV_ONDEMAND)       += cpufreq_ondemand.o
+ obj-$(CONFIG_CPU_FREQ_GOV_CONSERVATIVE)   += cpufreq_conservative.o
+ obj-$(CONFIG_CPU_FREQ_GOV_INTERACTIVE)    += cpufreq_interactive.o
++obj-$(CONFIG_CPU_FREQ_GOV_HYDROGENX)      += cpufreq_hydrogenx.o
+ obj-$(CONFIG_CPU_FREQ_GOV_COMMON)         += cpufreq_governor.o
+ obj-$(CONFIG_CPU_FREQ_GOV_ATTR_SET)       += cpufreq_governor_attr_set.o
+ 
+ obj-$(CONFIG_CPUFREQ_DT)                  += cpufreq-dt.o
+diff --git a/drivers/cpufreq/cpufreq_hydrogenx.c b/drivers/cpufreq/cpufreq_hydrogenx.c
+new file mode 100644
+index 000000000000..000000000000
+--- /dev/null
++++ b/drivers/cpufreq/cpufreq_hydrogenx.c
+@@ -0,0 +1,418 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * drivers/cpufreq/cpufreq_hydrogenx.c
++ *
++ * HydrogenX cpufreq governor for Android 4.14 kernels.
++ *
++ * This governor is intentionally conservative in its integration: it uses
++ * the upstream 4.14 dbs governor framework, so it does not depend on private
++ * MTK hooks.  It provides fast ramp-up, a configurable hispeed floor,
++ * delayed ramp-down and a userspace boost pulse interface.
++ */
++
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
++
++#include <linux/cpufreq.h>
++#include <linux/jiffies.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++
++#include "cpufreq_governor.h"
++
++#define HYDROGENX_DEF_UP_THRESHOLD          85
++#define HYDROGENX_DEF_DOWN_THRESHOLD        35
++#define HYDROGENX_DEF_HISPEED_LOAD          70
++#define HYDROGENX_DEF_MIN_SAMPLE_TIME_MS    48
++#define HYDROGENX_DEF_POWERSAVE_BIAS        120
++#define HYDROGENX_DEF_BOOST_DURATION_MS     120
++#define HYDROGENX_MAX_POWERSAVE_BIAS        1000
++#define HYDROGENX_MAX_MIN_SAMPLE_TIME_MS    1000
++#define HYDROGENX_MAX_BOOST_DURATION_MS     5000
++
++struct hyd_dbs_tuners {
++	unsigned int down_threshold;
++	unsigned int hispeed_load;
++	unsigned int hispeed_freq;
++	unsigned int min_sample_time;
++	unsigned int powersave_bias;
++	unsigned int boost_duration_ms;
++	unsigned int fast_ramp_down;
++};
++
++struct hyd_policy_dbs_info {
++	struct policy_dbs_info policy_dbs;
++	unsigned long last_freq_update_jiffies;
++	unsigned long boost_until;
++};
++
++static inline struct hyd_policy_dbs_info *to_hyd_policy_dbs_info(struct policy_dbs_info *policy_dbs)
++{
++	return container_of(policy_dbs, struct hyd_policy_dbs_info, policy_dbs);
++}
++
++static int hyd_parse_uint(const char *buf, unsigned int *input)
++{
++	int ret;
++
++	ret = sscanf(buf, "%u", input);
++	return ret == 1 ? 0 : -EINVAL;
++}
++
++static unsigned int hyd_pick_hispeed(struct cpufreq_policy *policy,
++				     struct hyd_dbs_tuners *tuners)
++{
++	unsigned int hispeed;
++
++	if (tuners->hispeed_freq)
++		hispeed = tuners->hispeed_freq;
++	else
++		hispeed = policy->min + (policy->max - policy->min) * 65 / 100;
++
++	return clamp_t(unsigned int, hispeed, policy->min, policy->max);
++}
++
++static unsigned int hyd_apply_powersave_bias(struct cpufreq_policy *policy,
++					    unsigned int target,
++					    struct hyd_dbs_tuners *tuners)
++{
++	unsigned int bias = tuners->powersave_bias;
++
++	if (!bias || target <= policy->min)
++		return target;
++
++	if (bias > HYDROGENX_MAX_POWERSAVE_BIAS)
++		bias = HYDROGENX_MAX_POWERSAVE_BIAS;
++
++	target = policy->min +
++		(target - policy->min) * (HYDROGENX_MAX_POWERSAVE_BIAS - bias) /
++		HYDROGENX_MAX_POWERSAVE_BIAS;
++
++	return clamp_t(unsigned int, target, policy->min, policy->max);
++}
++
++static unsigned int hyd_target_freq(struct cpufreq_policy *policy,
++				    unsigned int load)
++{
++	unsigned int min_f = policy->cpuinfo.min_freq;
++	unsigned int max_f = policy->cpuinfo.max_freq;
++
++	min_f = max(min_f, policy->min);
++	max_f = min(max_f, policy->max);
++
++	if (unlikely(max_f <= min_f))
++		return policy->min;
++
++	return min_f + load * (max_f - min_f) / 100;
++}
++
++static void hyd_set_target(struct cpufreq_policy *policy,
++			   unsigned int target,
++			   unsigned int relation)
++{
++	struct policy_dbs_info *policy_dbs = policy->governor_data;
++	struct dbs_data *dbs_data = policy_dbs->dbs_data;
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	struct hyd_policy_dbs_info *hyd_info;
++	unsigned long hold_time;
++
++	target = clamp_t(unsigned int, target, policy->min, policy->max);
++	hyd_info = to_hyd_policy_dbs_info(policy_dbs);
++
++	if (target < policy->cur && !tuners->fast_ramp_down &&
++	    tuners->min_sample_time) {
++		hold_time = msecs_to_jiffies(tuners->min_sample_time);
++		if (time_before(jiffies,
++				hyd_info->last_freq_update_jiffies + hold_time))
++			return;
++	}
++
++	if (policy->cur == target)
++		return;
++
++	__cpufreq_driver_target(policy, target, relation);
++	hyd_info->last_freq_update_jiffies = jiffies;
++}
++
++static unsigned int hyd_dbs_update(struct cpufreq_policy *policy)
++{
++	struct policy_dbs_info *policy_dbs = policy->governor_data;
++	struct hyd_policy_dbs_info *hyd_info = to_hyd_policy_dbs_info(policy_dbs);
++	struct dbs_data *dbs_data = policy_dbs->dbs_data;
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int load, target, hispeed;
++
++	load = dbs_update(policy);
++	hispeed = hyd_pick_hispeed(policy, tuners);
++
++	if (time_before(jiffies, hyd_info->boost_until)) {
++		hyd_set_target(policy, max(hispeed, policy->cur), CPUFREQ_RELATION_L);
++		return max_t(unsigned int, dbs_data->sampling_rate / 2,
++			     dbs_data->sampling_rate ? dbs_data->sampling_rate / 2 : 10000);
++	}
++
++	if (load >= dbs_data->up_threshold) {
++		policy_dbs->rate_mult = 1;
++		hyd_set_target(policy, policy->max, CPUFREQ_RELATION_H);
++		return dbs_data->sampling_rate;
++	}
++
++	target = hyd_target_freq(policy, load);
++
++	if (load >= tuners->hispeed_load) {
++		if (target < hispeed)
++			target = hispeed;
++		hyd_set_target(policy, target, CPUFREQ_RELATION_L);
++		return dbs_data->sampling_rate;
++	}
++
++	if (load <= tuners->down_threshold) {
++		target = hyd_apply_powersave_bias(policy, target, tuners);
++		hyd_set_target(policy, target, CPUFREQ_RELATION_H);
++		return dbs_data->sampling_rate;
++	}
++
++	hyd_set_target(policy, target, CPUFREQ_RELATION_C);
++	return dbs_data->sampling_rate;
++}
++
++/************************** sysfs interface ************************/
++
++static ssize_t store_io_is_busy(struct gov_attr_set *attr_set,
++				 const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	dbs_data->io_is_busy = !!input;
++	gov_update_cpu_data(dbs_data);
++
++	return count;
++}
++
++static ssize_t store_ignore_nice_load(struct gov_attr_set *attr_set,
++				      const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	dbs_data->ignore_nice_load = !!input;
++	gov_update_cpu_data(dbs_data);
++
++	return count;
++}
++
++static ssize_t store_up_threshold(struct gov_attr_set *attr_set,
++				  const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input < 2 || input > 100 || input <= tuners->down_threshold)
++		return -EINVAL;
++
++	dbs_data->up_threshold = input;
++	return count;
++}
++
++static ssize_t store_down_threshold(struct gov_attr_set *attr_set,
++				    const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input < 1 || input >= dbs_data->up_threshold)
++		return -EINVAL;
++
++	tuners->down_threshold = input;
++	return count;
++}
++
++static ssize_t store_hispeed_load(struct gov_attr_set *attr_set,
++				   const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input < tuners->down_threshold || input > 100)
++		return -EINVAL;
++
++	tuners->hispeed_load = input;
++	return count;
++}
++
++static ssize_t store_hispeed_freq(struct gov_attr_set *attr_set,
++				   const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	/* 0 means auto hispeed: 65% between policy min and max. */
++	tuners->hispeed_freq = input;
++	return count;
++}
++
++static ssize_t store_min_sample_time(struct gov_attr_set *attr_set,
++				      const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_MAX_MIN_SAMPLE_TIME_MS)
++		return -EINVAL;
++
++	tuners->min_sample_time = input;
++	return count;
++}
++
++static ssize_t store_powersave_bias(struct gov_attr_set *attr_set,
++				     const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_MAX_POWERSAVE_BIAS)
++		return -EINVAL;
++
++	tuners->powersave_bias = input;
++	return count;
++}
++
++static ssize_t store_fast_ramp_down(struct gov_attr_set *attr_set,
++				     const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	tuners->fast_ramp_down = !!input;
++	return count;
++}
++
++static ssize_t store_boost_duration_ms(struct gov_attr_set *attr_set,
++				       const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (input > HYDROGENX_MAX_BOOST_DURATION_MS)
++		return -EINVAL;
++
++	tuners->boost_duration_ms = input;
++	return count;
++}
++
++static ssize_t store_boostpulse(struct gov_attr_set *attr_set,
++				 const char *buf, size_t count)
++{
++	struct dbs_data *dbs_data = to_dbs_data(attr_set);
++	struct hyd_dbs_tuners *tuners = dbs_data->tuners;
++	struct policy_dbs_info *policy_dbs;
++	unsigned long boost_until;
++	unsigned int input;
++
++	if (hyd_parse_uint(buf, &input))
++		return -EINVAL;
++
++	if (!input)
++		return count;
++
++	boost_until = jiffies + msecs_to_jiffies(tuners->boost_duration_ms);
++
++	list_for_each_entry(policy_dbs, &attr_set->policy_list, list) {
++		struct hyd_policy_dbs_info *hyd_info;
++		struct cpufreq_policy *policy = policy_dbs->policy;
++		unsigned int hispeed;
++
++		if (!policy)
++			continue;
++
++		hyd_info = to_hyd_policy_dbs_info(policy_dbs);
++		hyd_info->boost_until = boost_until;
++		hispeed = hyd_pick_hispeed(policy, tuners);
++
++		mutex_lock(&policy_dbs->update_mutex);
++		hyd_set_target(policy, max(hispeed, policy->cur), CPUFREQ_RELATION_L);
++		mutex_unlock(&policy_dbs->update_mutex);
++	}
++
++	return count;
++}
++
++gov_show_one_common(sampling_rate);
++gov_show_one_common(up_threshold);
++gov_show_one_common(ignore_nice_load);
++gov_show_one_common(io_is_busy);
++gov_show_one(hyd, down_threshold);
++gov_show_one(hyd, hispeed_load);
++gov_show_one(hyd, hispeed_freq);
++gov_show_one(hyd, min_sample_time);
++gov_show_one(hyd, powersave_bias);
++gov_show_one(hyd, fast_ramp_down);
++gov_show_one(hyd, boost_duration_ms);
++
++gov_attr_rw(sampling_rate);
++gov_attr_rw(up_threshold);
++gov_attr_rw(ignore_nice_load);
++gov_attr_rw(io_is_busy);
++gov_attr_rw(down_threshold);
++gov_attr_rw(hispeed_load);
++gov_attr_rw(hispeed_freq);
++gov_attr_rw(min_sample_time);
++gov_attr_rw(powersave_bias);
++gov_attr_rw(fast_ramp_down);
++gov_attr_rw(boost_duration_ms);
++static struct governor_attr boostpulse =
++	__ATTR(boostpulse, 0200, NULL, store_boostpulse);
++
++static struct attribute *hyd_attributes[] = {
++	&sampling_rate.attr,
++	&up_threshold.attr,
++	&down_threshold.attr,
++	&hispeed_load.attr,
++	&hispeed_freq.attr,
++	&min_sample_time.attr,
++	&powersave_bias.attr,
++	&fast_ramp_down.attr,
++	&boost_duration_ms.attr,
++	&boostpulse.attr,
++	&ignore_nice_load.attr,
++	&io_is_busy.attr,
++	NULL
++};
++
++/************************** sysfs end ************************/
++
++static struct policy_dbs_info *hyd_alloc(void)
++{
++	struct hyd_policy_dbs_info *hyd_info;
++
++	hyd_info = kzalloc(sizeof(*hyd_info), GFP_KERNEL);
++	return hyd_info ? &hyd_info->policy_dbs : NULL;
++}
++
++static void hyd_free(struct policy_dbs_info *policy_dbs)
++{
++	kfree(to_hyd_policy_dbs_info(policy_dbs));
++}
++
++static int hyd_init(struct dbs_data *dbs_data)
++{
++	struct hyd_dbs_tuners *tuners;
++
++	tuners = kzalloc(sizeof(*tuners), GFP_KERNEL);
++	if (!tuners)
++		return -ENOMEM;
++
++	dbs_data->up_threshold = HYDROGENX_DEF_UP_THRESHOLD;
++	dbs_data->ignore_nice_load = 0;
++	dbs_data->io_is_busy = 1;
++
++	tuners->down_threshold = HYDROGENX_DEF_DOWN_THRESHOLD;
++	tuners->hispeed_load = HYDROGENX_DEF_HISPEED_LOAD;
++	tuners->hispeed_freq = 0;
++	tuners->min_sample_time = HYDROGENX_DEF_MIN_SAMPLE_TIME_MS;
++	tuners->powersave_bias = HYDROGENX_DEF_POWERSAVE_BIAS;
++	tuners->boost_duration_ms = HYDROGENX_DEF_BOOST_DURATION_MS;
++	tuners->fast_ramp_down = 0;
++	dbs_data->tuners = tuners;
++
++	return 0;
++}
++
++static void hyd_exit(struct dbs_data *dbs_data)
++{
++	kfree(dbs_data->tuners);
++}
++
++static void hyd_start(struct cpufreq_policy *policy)
++{
++	struct policy_dbs_info *policy_dbs = policy->governor_data;
++	struct hyd_policy_dbs_info *hyd_info = to_hyd_policy_dbs_info(policy_dbs);
++
++	hyd_info->last_freq_update_jiffies = jiffies;
++	hyd_info->boost_until = 0;
++}
++
++static struct dbs_governor hyd_dbs_gov = {
++	.gov = CPUFREQ_DBS_GOVERNOR_INITIALIZER("hydrogenx"),
++	.kobj_type = {
++		.default_attrs = hyd_attributes,
++	},
++	.gov_dbs_update = hyd_dbs_update,
++	.alloc = hyd_alloc,
++	.free = hyd_free,
++	.init = hyd_init,
++	.exit = hyd_exit,
++	.start = hyd_start,
++};
++
++#define CPU_FREQ_GOV_HYDROGENX (&hyd_dbs_gov.gov)
++
++static int __init cpufreq_gov_hydrogenx_init(void)
++{
++	return cpufreq_register_governor(CPU_FREQ_GOV_HYDROGENX);
++}
++
++static void __exit cpufreq_gov_hydrogenx_exit(void)
++{
++	cpufreq_unregister_governor(CPU_FREQ_GOV_HYDROGENX);
++}
++
++MODULE_AUTHOR("ChatGPT");
++MODULE_DESCRIPTION("CPUfreq policy governor 'hydrogenx'");
++MODULE_LICENSE("GPL");
++
++#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_HYDROGENX
++struct cpufreq_governor *cpufreq_default_governor(void)
++{
++	return CPU_FREQ_GOV_HYDROGENX;
++}
++core_initcall(cpufreq_gov_hydrogenx_init);
++#else
++module_init(cpufreq_gov_hydrogenx_init);
++#endif
++
++module_exit(cpufreq_gov_hydrogenx_exit);
+-- 
+2.43.0
