@@ -1,0 +1,58 @@
+--- a/drivers/kernelsu/runtime/ksud.c
++++ b/drivers/kernelsu/runtime/ksud.c
+@@ -51,7 +51,7 @@
+     ksu_load_allow_list();
+     ksu_observer_init();
+ 
+-    ksu_selinux_hide_handle_post_fs_data();
++    ksu_selinux_handle_post_fs_data();
+ 
+     // sanity check, this may influence the performance
+     stop_input_hook();
+@@ -211,7 +211,7 @@
+             check_argv(*argv, 1, "second_stage", buf, sizeof(buf)))
+         {
+             pr_info("/system/bin/init second_stage executed\n");
+-            ksu_selinux_hide_handle_second_stage();
++            ksu_selinux_handle_second_stage();
+             apply_kernelsu_rules();
+             cache_sid();
+             setup_ksu_cred();
+@@ -268,7 +268,7 @@
+         char buf[16];
+         if (!init_second_stage_executed && check_argv(*argv, 1, "second_stage", buf, sizeof(buf))) {
+             pr_info("/system/bin/init second_stage executed\n");
+-            ksu_selinux_hide_handle_second_stage();
++            ksu_selinux_handle_second_stage();
+             apply_kernelsu_rules();
+             cache_sid();
+             setup_ksu_cred();
+--- a/drivers/kernelsu/sulog/event.c
++++ b/drivers/kernelsu/sulog/event.c
+@@ -80,7 +80,7 @@
+     if (!filename_user)
+         return ksu_sulog_copy_empty_string(dst);
+ 
+-    ret = ksu_strncpy_from_user_nofault(dst, (const void __user *)untagged_addr((unsigned long)filename_user), dst_len);
++    ret = ksu_strncpy_from_user(dst, (const void __user *)untagged_addr((unsigned long)filename_user), dst_len);
+     if (ret <= 0)
+         return ksu_sulog_copy_empty_string(dst);
+ 
+@@ -142,7 +142,7 @@
+             return ksu_sulog_copy_empty_string(dst);
+ 
+         copied =
+-            strncpy_from_user_nofault(arg, (const void __user *)untagged_addr((unsigned long)arg_user), sizeof(arg));
++            strncpy_from_user(arg, (const void __user *)untagged_addr((unsigned long)arg_user), sizeof(arg));
+         if (copied <= 0)
+             return ksu_sulog_copy_empty_string(dst);
+ 
+@@ -257,7 +257,7 @@
+         if (IS_ERR(arg_user))
+             return ksu_sulog_copy_empty_string(dst);
+ 
+-        copied = ksu_strncpy_from_user_nofault(arg, (const void __user *)untagged_addr((unsigned long)arg_user),
++        copied = ksu_strncpy_from_user(arg, (const void __user *)untagged_addr((unsigned long)arg_user),
+                                                sizeof(arg));
+         if (copied <= 0)
+             return ksu_sulog_copy_empty_string(dst);
